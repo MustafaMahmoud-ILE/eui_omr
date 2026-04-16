@@ -5,7 +5,7 @@ import os
 import copy
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Slot, QSize, QStandardPaths, QSettings, QTimer
+from PySide6.QtCore import Qt, Slot, QSize, QStandardPaths, QSettings, QTimer, Signal
 from PySide6.QtGui import QIcon, QFont, QImage, QPixmap, QShortcut, QKeySequence, QColor
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QProgressBar, QHeaderView, QMessageBox,
     QStackedWidget, QLineEdit, QComboBox, QSpinBox, QDialog,
     QTabWidget, QScrollArea, QCheckBox, QGridLayout, QSlider,
-    QListWidget
+    QListWidget, QSpacerItem, QSizePolicy, QGraphicsOpacityEffect
 )
 
 import cv2
@@ -23,217 +23,257 @@ from src.core.project import ProjectManager
 from src.ui.workers import PDFGraderWorker, AutoTuneWorker
 from src.models.schemas import GradingResult
 from src.data.excel import ExcelManager
+from src.ui.style import COLORS, APP_QSS, STYLE_TOKENS
 from src.utils.paths import get_resource_path, get_config_path
+from PySide6.QtCore import (
+    QPropertyAnimation, QEasingCurve, QPoint, 
+    QParallelAnimationGroup, QSequentialAnimationGroup
+)
+
+# --- Animation Utilities ---
+
+class SlidingStackedWidget(QStackedWidget):
+    animation_finished = Signal(int)
+
+    def __init__(self, parent=None):
+        super(SlidingStackedWidget, self).__init__(parent)
+        self.m_duration = 400
+        self.m_easing = QEasingCurve.OutQuart
+        self.m_active = False
+
+    def slideInIdx(self, idx):
+        if idx == self.currentIndex():
+            return
+        
+        # Calculate direction
+        old_idx = self.currentIndex()
+        if idx > old_idx:
+            direction = "right_to_left"
+        else:
+            direction = "left_to_right"
+
+        self.slideInWidget(self.widget(idx), direction)
+
+    def slideInWidget(self, new_widget, direction):
+        if self.m_active:
+            return
+
+        self.m_active = True
+        width = self.frameRect().width()
+        height = self.frameRect().height()
+
+        offset_x = width if direction == "right_to_left" else -width
+        
+        curr_widget = self.currentWidget()
+        next_widget = new_widget
+
+        next_widget.setGeometry(0, 0, width, height)
+        next_widget.move(offset_x, 0)
+        next_widget.show()
+        next_widget.raise_()
+
+        next_widget.raise_()
+        
+        # Add opacity effect for incoming widget
+        self.eff = QGraphicsOpacityEffect(next_widget)
+        next_widget.setGraphicsEffect(self.eff)
+
+        # Animations
+        self.anim_next = QPropertyAnimation(next_widget, b"pos")
+        self.anim_next.setDuration(self.m_duration)
+        self.anim_next.setEasingCurve(self.m_easing)
+        self.anim_next.setStartValue(QPoint(offset_x, 0))
+        self.anim_next.setEndValue(QPoint(0, 0))
+
+        self.anim_curr = QPropertyAnimation(curr_widget, b"pos")
+        self.anim_curr.setDuration(self.m_duration)
+        self.anim_curr.setEasingCurve(self.m_easing)
+        self.anim_curr.setStartValue(QPoint(0, 0))
+        self.anim_curr.setEndValue(QPoint(-offset_x, 0))
+        
+        self.anim_fade = QPropertyAnimation(self.eff, b"opacity")
+        self.anim_fade.setDuration(self.m_duration)
+        self.anim_fade.setEasingCurve(self.m_easing)
+        self.anim_fade.setStartValue(0.0)
+        self.anim_fade.setEndValue(1.0)
+
+        self.anims = QParallelAnimationGroup()
+        self.anims.addAnimation(self.anim_next)
+        self.anims.addAnimation(self.anim_curr)
+        self.anims.addAnimation(self.anim_fade)
+        self.anims.finished.connect(lambda: self._on_finished(idx_to_set=self.indexOf(new_widget), target=next_widget))
+        self.anims.start()
+
+    def _on_finished(self, idx_to_set, target):
+        self.setCurrentIndex(idx_to_set)
+        target.setGraphicsEffect(None) # Cleanup
+        self.m_active = False
+        self.animation_finished.emit(idx_to_set)
 
 # --- Shared UI Styling ---
-APP_STYLESHEET = """
-    /* Premium Night Slate Design System */
-    QMainWindow, QDialog, QStackedWidget { 
-        background-color: #020617; 
-    }
-    QScrollArea {
-        background-color: transparent;
-        border: none;
-    }
-    QWidget { 
-        color: #F8FAFC; 
-        font-family: 'Inter', 'Segoe UI', 'Outfit', sans-serif; 
-        font-size: 10pt; 
-    }
-    
-    /* Typography & Labels */
-    QLabel { background: transparent; color: #94A3B8; }
-    QLabel[cssClass="title"] { 
-        font-size: 24pt; 
-        font-weight: 800; 
-        color: #F8FAFC; 
-        margin-bottom: 5px;
-    }
-    QLabel[cssClass="subtitle"] { 
-        font-size: 11pt; 
-        color: #64748B; 
-    }
-    QLabel#header_title { 
-        font-size: 16pt; 
-        font-weight: 700; 
-        color: #38BDF8; 
-    }
-    
-    /* Card/Surface Style */
-    QWidget#card {
-        background-color: #0F172A;
-        border: 1px solid #1E293B;
-        border-radius: 16px;
-    }
-    
-    /* Premium Buttons */
-    QPushButton {
-        background-color: #1E293B;
-        border: 1px solid #334155;
-        border-radius: 10px;
-        padding: 10px 20px;
-        font-weight: 600;
-        color: #F1F5F9;
-    }
-    QPushButton:hover { 
-        background-color: #334155; 
-        border-color: #475569;
-    }
-    QPushButton:pressed { 
-        background-color: #0F172A; 
-    }
-    QPushButton:disabled { 
-        color: #334155; 
-        background-color: transparent; 
-        border: 1px solid #1E293B; 
-    }
-    
-    QPushButton[cssClass="primary"] { 
-        background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0EA5E9, stop:1 #2563EB);
-        color: #FFFFFF; 
-        border: none;
-    }
-    QPushButton[cssClass="primary"]:hover { 
-        background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #38BDF8, stop:1 #3B82F6);
-    }
-    QPushButton[cssClass="primary"]:disabled {
-        background-color: #0F172A;
-        color: #334155;
-    }
-    
-    QPushButton[cssClass="success"] { 
-        background-color: #059669; 
-        color: #FFFFFF; 
-        border: none;
-    }
-    QPushButton[cssClass="success"]:hover { background-color: #10B981; }
-    QPushButton[cssClass="success"]:disabled {
-        background-color: #064E3B; /* Darker, desaturated green */
-        opacity: 0.5;
-    }
-    
-    QPushButton[cssClass="warning"] { 
-        background-color: #D97706; 
-        color: #FFFFFF; 
-        border: none;
-    }
-    QPushButton[cssClass="warning"]:hover { background-color: #F59E0B; }
-    QPushButton[cssClass="warning"]:disabled {
-        background-color: #78350F; /* Darker, desaturated amber */
-    }
-    
-    /* Inputs */
-    QLineEdit, QComboBox, QSpinBox {
-        background-color: #020617;
-        border: 1px solid #334155;
-        border-radius: 10px;
-        padding: 12px;
-        color: #F8FAFC;
-    }
-    QLineEdit:focus, QComboBox:focus, QSpinBox:focus { 
-        border-color: #38BDF8; 
-        background-color: #0F172A;
-    }
-    
-    /* Fix for Dropdown visibility */
-    QComboBox QAbstractItemView {
-        background-color: #0F172A;
-        border: 1px solid #334155;
-        selection-background-color: #1E293B;
-        selection-color: #38BDF8;
-        outline: none;
-    }
-    
-    /* Modern Table Styling */
-    QTableWidget {
-        background-color: #0F172A;
-        gridline-color: #1E293B;
-        border: 1px solid #1E293B;
-        border-radius: 12px;
-        alternate-background-color: #131C2F;
-        selection-background-color: rgba(56, 189, 248, 0.2);
-        selection-color: #38BDF8;
-        outline: none;
-    }
-    QHeaderView::section {
-        background-color: #1E293B;
-        color: #94A3B8;
-        font-weight: 700;
-        padding: 15px;
-        border: none;
-        border-bottom: 1px solid #334155;
-    }
-    
-    /* Professional Scrollbars */
-    QScrollBar:vertical {
-        border: none;
-        background: #020617;
-        width: 10px;
-        margin: 0px;
-    }
-    QScrollBar::handle:vertical {
-        background: #334155;
-        min-height: 20px;
-        border-radius: 5px;
-    }
-    QScrollBar::handle:vertical:hover {
-        background: #475569;
-    }
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-        height: 0px;
-    }
-    
-    /* Progress Bar */
-    QProgressBar {
-        background-color: #1E293B;
-        border: none;
-        border-radius: 6px;
-        text-align: center;
-        color: transparent;
-        height: 8px;
-    }
-    QProgressBar::chunk {
-        background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #38BDF8, stop:1 #818CF8);
-        border-radius: 6px;
-    }
-    
-    /* Modal Lists */
-    QListWidget {
-        background-color: #0F172A;
-        border: 1px solid #1E293B;
-        border-radius: 10px;
-        padding: 5px;
-    }
-    QListWidget::item {
-        padding: 12px;
-        border-radius: 6px;
-        margin: 2px;
-    }
-    QListWidget::item:selected {
-        background-color: #1E293B;
-        color: #38BDF8;
-        font-weight: bold;
-    }
-    
-    /* Window Controls */
-    QPushButton#min_btn, QPushButton#close_btn {
-        background-color: transparent;
-        border: none;
-        border-radius: 0px;
-        padding: 0px;
-        font-size: 16pt;
-        font-family: 'Arial', sans-serif;
-        font-weight: bold;
-        color: #FFFFFF;
-        text-align: center;
-    }
-    QPushButton#min_btn:hover {
-        background-color: #334155;
-    }
-    QPushButton#close_btn:hover {
-        background-color: #EF4444;
-    }
-"""
+
+class TitleBar(QWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setObjectName("title_bar")
+        self.setFixedHeight(40)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(15, 0, 5, 0)
+        layout.setSpacing(5)
+        
+        # Logo and Title
+        self.logo = QLabel()
+        logo_pix = QPixmap(get_resource_path("assets/logo_premium.png"))
+        if not logo_pix.isNull():
+            self.logo.setPixmap(logo_pix.scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        layout.addWidget(self.logo)
+        
+        self.title = QLabel("EUI OMR Engine")
+        self.title.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 600; font-size: 12px;")
+        layout.addWidget(self.title)
+        
+        layout.addStretch()
+        
+        # Undo/Redo Controls
+        self.btn_undo = QPushButton("↩")
+        self.btn_undo.setObjectName("win_control")
+        self.btn_undo.setFixedSize(40, 40)
+        self.btn_undo.setToolTip("Undo (Ctrl+Z)")
+        self.btn_undo.clicked.connect(parent._undo)
+        self.btn_undo.setEnabled(False)
+        layout.addWidget(self.btn_undo)
+        
+        self.btn_redo = QPushButton("↪")
+        self.btn_redo.setObjectName("win_control")
+        self.btn_redo.setFixedSize(40, 40)
+        self.btn_redo.setToolTip("Redo (Ctrl+Y)")
+        self.btn_redo.clicked.connect(parent._redo)
+        self.btn_redo.setEnabled(False)
+        layout.addWidget(self.btn_redo)
+        
+        layout.addSpacing(10)
+        
+        # Window Controls
+        self.btn_min = QPushButton("−")
+        self.btn_min.setObjectName("win_control")
+        self.btn_min.setFixedSize(40, 40)
+        self.btn_min.clicked.connect(parent.showMinimized)
+        layout.addWidget(self.btn_min)
+        
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setObjectName("win_control")
+        self.btn_close.setProperty("cssId", "close_btn") # For special hover
+        self.btn_close.setFixedSize(40, 40)
+        self.btn_close.clicked.connect(parent.close)
+        # Custom QSS for close button hover
+        self.btn_close.setStyleSheet("QPushButton:hover { background-color: #EF4444; color: white; }")
+        layout.addWidget(self.btn_close)
+
+    def mousePressEvent(self, event):
+        self.parent().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        self.parent().mouseMoveEvent(event)
+
+
+class SidebarItem(QPushButton):
+    def __init__(self, icon_text, label, index, parent=None):
+        super().__init__(parent)
+        self.setObjectName("nav_item")
+        self.setCheckable(True)
+        self.index = index
+        self.label_text = label
+        self.icon_text = icon_text # Emojis or placeholders for now
+        self.setFixedHeight(44)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setText(f" {icon_text}   {label}")
+
+    def setCollapsed(self, collapsed):
+        if collapsed:
+            self.setText(f" {self.icon_text}")
+            self.setToolTip(self.label_text)
+        else:
+            self.setText(f" {self.icon_text}   {self.label_text}")
+            self.setToolTip("")
+
+
+class Sidebar(QWidget):
+    nav_clicked = Signal(int)
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setObjectName("sidebar")
+        self.setFixedWidth(240)
+        self.is_collapsed = False
+        
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(12, 20, 12, 20)
+        self.layout.setSpacing(8)
+        
+        # Toggle Button at top
+        self.btn_toggle = QPushButton(" ☰ ")
+        self.btn_toggle.setObjectName("nav_item")
+        self.btn_toggle.setFixedSize(40, 40)
+        self.btn_toggle.clicked.connect(self.toggle)
+        self.layout.addWidget(self.btn_toggle)
+        self.layout.addSpacing(20)
+        
+        # Nav Items
+        self.items = []
+        self._add_item("🏠", "Home", 0)
+        self._add_item("⚙️", "Session Setup", 1)
+        self._add_item("📊", "Dashboard", 2)
+        
+        self.layout.addStretch()
+        
+        # Bottom info
+        self.lbl_version = QLabel("v2.1.0")
+        self.lbl_version.setAlignment(Qt.AlignCenter)
+        self.layout.addWidget(self.lbl_version)
+
+    def _add_item(self, icon, label, index):
+        item = SidebarItem(icon, label, index, self)
+        item.clicked.connect(lambda: self.nav_clicked.emit(index))
+        self.layout.addWidget(item)
+        self.items.append(item)
+        if index == 0:
+            item.setChecked(True)
+            item.setProperty("active", "true")
+
+    def toggle(self):
+        new_width = 70 if not self.is_collapsed else 240
+        self.anim = QPropertyAnimation(self, b"minimumWidth")
+        self.anim.setDuration(250)
+        self.anim.setStartValue(self.width())
+        self.anim.setEndValue(new_width)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        
+        self.anim2 = QPropertyAnimation(self, b"maximumWidth")
+        self.anim2.setDuration(250)
+        self.anim2.setStartValue(self.width())
+        self.anim2.setEndValue(new_width)
+        self.anim2.setEasingCurve(QEasingCurve.OutCubic)
+        
+        self.anim.start()
+        self.anim2.start()
+        
+        self.is_collapsed = not self.is_collapsed
+        for item in self.items:
+            item.setCollapsed(self.is_collapsed)
+        
+        if self.is_collapsed:
+            self.lbl_version.setText("v2.1")
+        else:
+            self.lbl_version.setText("v2.1.0")
+
+    def set_active(self, index):
+        for i, item in enumerate(self.items):
+            active = (i == index)
+            item.setChecked(active)
+            item.setProperty("active", "true" if active else "false")
+            item.style().unpolish(item)
+            item.style().polish(item)
 
 def cv2_to_qpixmap(cv_img) -> QPixmap:
     """Helper to convert OpenCV crops into PySide natively."""
@@ -277,47 +317,57 @@ class ReviewModal(QDialog):
         self._ensure_images_loaded()
         
         main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(24, 24, 24, 24)
+        main_layout.setSpacing(24)
         
         # --- LEFT PANE ---
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(16)
         
-        lbl_list = QLabel("Detected Errors:")
-        lbl_list.setStyleSheet("font-weight: bold; color: #FFFFFF;")
+        lbl_list = QLabel("Detected Errors")
+        lbl_list.setProperty("cssClass", "header")
         left_layout.addWidget(lbl_list)
         
-        from PySide6.QtWidgets import QListWidget
         self.list_widget = QListWidget()
         self.list_widget.currentRowChanged.connect(self._on_list_selected)
         left_layout.addWidget(self.list_widget)
         
-        left_layout.addSpacing(10)
-        
         # Action Buttons
-        self.btn_save = QPushButton("Accept Changes and Continue")
-        self.btn_save.setProperty("cssClass", "primary")
-        self.btn_save.setEnabled(False) # Wait for input
-        self.btn_save.clicked.connect(self.accept)
-        left_layout.addWidget(self.btn_save)
+        button_group = QVBoxLayout()
+        button_group.setSpacing(8)
         
-        self.btn_ignore = QPushButton("Ignore for Now")
-        self.btn_ignore.setProperty("cssClass", "warning")
+        self.btn_save = QPushButton("Accept Changes")
+        self.btn_save.setProperty("cssClass", "primary")
+        self.btn_save.setFixedHeight(40)
+        self.btn_save.setEnabled(False) 
+        self.btn_save.clicked.connect(self.accept)
+        button_group.addWidget(self.btn_save)
+        
+        self.btn_ignore = QPushButton("Discard Changes")
+        self.btn_ignore.setFixedHeight(40)
         self.btn_ignore.clicked.connect(self.reject)
-        left_layout.addWidget(self.btn_ignore)
+        button_group.addWidget(self.btn_ignore)
+        left_layout.addLayout(button_group)
         
         main_layout.addWidget(left_widget, stretch=1)
         
         # --- RIGHT PANE (Scrollable) ---
+        container_right = QWidget()
+        container_right.setObjectName("card")
+        right_layout = QVBoxLayout(container_right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.NoFrame)
-        self.scroll.setStyleSheet("background-color: #1A1A1A; border-radius: 8px;")
         
         self.stack = QStackedWidget()
         self.scroll.setWidget(self.stack)
+        right_layout.addWidget(self.scroll)
         
-        main_layout.addWidget(self.scroll, stretch=2)
+        main_layout.addWidget(container_right, stretch=3)
         
         self.id_input: QLineEdit | None = None
         self.ver_input: QComboBox | None = None
@@ -398,33 +448,29 @@ class ReviewModal(QDialog):
     def _build_id_panel(self):
         w = QWidget()
         l = QVBoxLayout(w)
+        l.setContentsMargins(24, 24, 24, 24)
+        l.setSpacing(16)
+        
         lbl_title = QLabel("Identity Verification")
-        lbl_title.setProperty("cssClass", "title")
+        lbl_title.setProperty("cssClass", "header")
         l.addWidget(lbl_title)
         
+        l.addWidget(QLabel("Student's Handwritten Name:"))
         lbl_sig = QLabel()
         if self.temp_sig_crop is not None:
             pix = cv2_to_qpixmap(self.temp_sig_crop)
             scaled = pix.scaled(pix.width() * 0.75, pix.height() * 0.75, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             lbl_sig.setPixmap(scaled)
-        l.addWidget(QLabel("Student's Handwritten Name:"))
         l.addWidget(lbl_sig)
         
-        l.addSpacing(15)
-        
-        l.addSpacing(15)
         l.addWidget(QLabel("ID Box Extract:"))
-        
-        # Ensure the image can be scrolled if too large
         self.lbl_id = QLabel()
         if self.temp_id_crop is not None:
             pix = cv2_to_qpixmap(self.temp_id_crop)
             scaled = pix.scaled(pix.width() * 0.75, pix.height() * 0.75, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.lbl_id.setPixmap(scaled)
-        
         l.addWidget(self.lbl_id)
         
-        l.addSpacing(15)
         l.addWidget(QLabel("Override Extracted ID:"))
         self.id_input = QLineEdit(self.res.student_id)
         self.id_input.setPlaceholderText("Enter corrected ID...")
@@ -604,37 +650,38 @@ class AnswerKeyDialog(QDialog):
             
         layout.addWidget(self.tabs)
         
-        # Apply the shared stylesheet to ensure correct dark mode colors
-        self.setStyleSheet(parent.styleSheet() if parent else "")
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane { border: 1px solid #334155; top: -1px; background: #0F172A; }
-            QTabBar::tab { background: #1E293B; color: #94A3B8; padding: 10px 20px; border: 1px solid #334155; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; }
-            QTabBar::tab:selected { background: #0F172A; color: #38BDF8; font-weight: bold; }
-            QCheckBox { color: #F8FAFC; spacing: 8px; background: transparent; }
-            QCheckBox::indicator { 
-                width: 20px; height: 20px; 
-                background-color: #0F172A; 
-                border: 1px solid #334155; 
-                border-radius: 4px; 
-            }
-            QCheckBox::indicator:hover { border-color: #38BDF8; background-color: #1E293B; }
-            QCheckBox::indicator:checked { 
-                background-color: #38BDF8; 
-                border-color: #0EA5E9;
-            }
-            QScrollArea, QScrollArea > QWidget > QWidget { 
-                background-color: #0F172A; 
-                border: none;
-            }
-            QLabel { color: #F1F5F9; font-weight: 500; }
-        """)
-        
         btns = QHBoxLayout()
-        btn_ok = QPushButton("Save Keys")
+        btns.setContentsMargins(0, 10, 0, 0)
+        btn_ok = QPushButton("Apply and Save Keys")
         btn_ok.setProperty("cssClass", "primary")
+        btn_ok.setFixedHeight(40)
         btn_ok.clicked.connect(self.accept)
         btns.addWidget(btn_ok)
         layout.addLayout(btns)
+        
+        # Apply the shared stylesheet
+        self.setStyleSheet(APP_QSS)
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border: 1px solid {COLORS['border']}; top: -1px; background: {COLORS['surface']}; }}
+            QTabBar::tab {{ background: {COLORS['surface']}; color: {COLORS['text_secondary']}; padding: 10px 20px; border: 1px solid {COLORS['border']}; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; }}
+            QTabBar::tab:selected {{ background: {COLORS['background']}; color: {COLORS['accent']}; font-weight: bold; }}
+            QCheckBox {{ color: {COLORS['text_primary']}; spacing: 8px; background: transparent; }}
+            QCheckBox::indicator {{ 
+                width: 18px; height: 18px; 
+                background-color: {COLORS['background']}; 
+                border: 1px solid {COLORS['border']}; 
+                border-radius: 4px; 
+            }}
+            QCheckBox::indicator:hover {{ border-color: {COLORS['accent']}; }}
+            QCheckBox::indicator:checked {{ 
+                background-color: {COLORS['accent']}; 
+                border-color: {COLORS['accent']};
+            }}
+            QScrollArea, QScrollArea > QWidget > QWidget {{ 
+                background-color: {COLORS['surface']}; 
+                border: none;
+            }}
+        """)
 
     def _scan_key(self, version):
         file, _ = QFileDialog.getOpenFileName(self, f"Select Scan for Version {version}", self.last_path, "PDF (*.pdf)")
@@ -695,8 +742,8 @@ class MainWindow(QMainWindow):
         # Application Branding
         self.setWindowTitle("EUI OMR Engine - Academic Dashboard")
         self.setWindowIcon(QIcon(get_resource_path("assets/logo.ico")))
-        self.setMinimumSize(1100, 750)
-        self.setStyleSheet(APP_STYLESHEET)
+        self.setMinimumSize(1200, 800)
+        self.setStyleSheet(APP_QSS)
         
         # History System
         self.undo_stack: list[list[GradingResult]] = []
@@ -705,86 +752,38 @@ class MainWindow(QMainWindow):
         # Shortcuts
         QShortcut(QKeySequence("Ctrl+Z"), self, self._undo)
         QShortcut(QKeySequence("Ctrl+Y"), self, self._redo)
-        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self._redo)
         
-        # Main Container
+        # --- NEW STRUCTURAL LAYOUT ---
         self.central = QWidget()
         self.setCentralWidget(self.central)
-        self.layout = QVBoxLayout(self.central)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(0)
+        self.main_layout = QVBoxLayout(self.central)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
         
-        # --- GLOBAL HEADER ---
-        self.header = QWidget()
-        self.header.setFixedHeight(70)
-        self.header.setStyleSheet("background-color: #1E293B; border-bottom: 1px solid #334155;")
-        h_layout = QHBoxLayout(self.header)
-        h_layout.setContentsMargins(30, 0, 30, 0)
+        # 1. Custom Title Bar
+        self.title_bar = TitleBar(self)
+        self.btn_undo = self.title_bar.btn_undo
+        self.btn_redo = self.title_bar.btn_redo
+        self.main_layout.addWidget(self.title_bar)
         
-        # Logo
-        self.logo_lbl = QLabel()
-        logo_pix = QPixmap(get_resource_path("assets/logo_premium.png"))
-        if not logo_pix.isNull():
-            self.logo_lbl.setPixmap(logo_pix.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        h_layout.addWidget(self.logo_lbl)
+        # 2. Horizontal Container for Sidebar + Content
+        self.body_container = QWidget()
+        self.body_layout = QHBoxLayout(self.body_container)
+        self.body_layout.setContentsMargins(0, 0, 0, 0)
+        self.body_layout.setSpacing(0)
         
-        self.title_lbl = QLabel("EUI OMR DASHBOARD")
-        self.title_lbl.setObjectName("header_title")
-        h_layout.addWidget(self.title_lbl)
-        h_layout.addStretch()
+        # 3. Sidebar
+        self.sidebar = Sidebar(self)
+        self.sidebar.nav_clicked.connect(self._on_nav_clicked)
+        self.body_layout.addWidget(self.sidebar)
         
-        # Undo/Redo Buttons
-        self.btn_undo = QPushButton("↩️ Undo")
-        self.btn_undo.setToolTip("Undo Last Action (Ctrl+Z)")
-        self.btn_undo.setFixedWidth(80)
-        self.btn_undo.clicked.connect(self._undo)
-        self.btn_undo.setEnabled(False)
-        self.btn_undo.setStyleSheet("""
-            QPushButton { background-color: #334155; color: white; border: 1px solid #475569; padding: 5px; }
-            QPushButton:hover { background-color: #475569; }
-            QPushButton:disabled { background-color: #1E293B; color: #475569; }
-        """)
-        h_layout.addWidget(self.btn_undo)
+        # 4. Main Stacked Content
+        self.stack = SlidingStackedWidget()
+        self.body_layout.addWidget(self.stack)
         
-        self.btn_redo = QPushButton("Redo ↪️")
-        self.btn_redo.setToolTip("Redo Last Action (Ctrl+Y)")
-        self.btn_redo.setFixedWidth(80)
-        self.btn_redo.clicked.connect(self._redo)
-        self.btn_redo.setEnabled(False)
-        self.btn_redo.setStyleSheet("""
-            QPushButton { background-color: #334155; color: white; border: 1px solid #475569; padding: 5px; }
-            QPushButton:hover { background-color: #475569; }
-            QPushButton:disabled { background-color: #1E293B; color: #475569; }
-        """)
-        h_layout.addWidget(self.btn_redo)
+        self.main_layout.addWidget(self.body_container)
         
-        h_layout.addSpacing(10)
-        
-        self.project_name_lbl = QLabel("No Project Loaded")
-        self.project_name_lbl.setStyleSheet("color: #94A3B8; font-weight: 500;")
-        h_layout.addWidget(self.project_name_lbl)
-        
-        h_layout.addStretch()
-        
-        self.btn_min = QPushButton("−")
-        self.btn_min.setObjectName("min_btn")
-        self.btn_min.setFixedSize(45, 45)
-        self.btn_min.clicked.connect(self.showMinimized)
-        h_layout.addWidget(self.btn_min)
-        
-        self.btn_close = QPushButton("X")
-        self.btn_close.setObjectName("close_btn")
-        self.btn_close.setFixedSize(45, 45)
-        self.btn_close.clicked.connect(self.close)
-        h_layout.addWidget(self.btn_close)
-        
-        self.layout.addWidget(self.header)
-        
-        # --- MAIN STACK ---
-        self.stack = QStackedWidget()
-        self.layout.addWidget(self.stack)
-        
-        # Persistent Settings Memory (Windows Registry / Config)
+        # Persistent Settings Memory
         self.settings = QSettings("EUI", "OMREngine")
         self.docs_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
         
@@ -808,17 +807,24 @@ class MainWindow(QMainWindow):
         
         self.stack.setCurrentIndex(0)
 
-    def update_header_project(self, name: str):
-        self.project_name_lbl.setText(f"Project: {name}")
+    def _on_nav_clicked(self, index):
+        if not self.pm and index > 0:
+            QMessageBox.information(self, "No Project", "Please create or load a project first.")
+            self.sidebar.set_active(0)
+            return
+        self.stack.slideInIdx(index)
+        self.sidebar.set_active(index)
+        # Immediately trigger entrance if it's the first time or if we want faster feedback
+        # but better to wait for slide to finish for the "cascading" look.
 
-    # ---------------------------------------------------------
-    # VIEW 1: WELCOME / LOAD PROJECT
-    # ---------------------------------------------------------
+    def update_header_project(self, name: str):
+        # Update sidebar version label or sidebar title instead of header
+        pass
     # --- Window Dragging Logic (Frameless Support) ---
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            # Check if click is on the header area
-            if self.header.underMouse():
+            # Check if click is on the title bar area
+            if self.title_bar.underMouse():
                 self._drag_pos = event.globalPosition().toPoint()
                 event.accept()
 
@@ -853,72 +859,103 @@ class MainWindow(QMainWindow):
     def build_welcome_view(self):
         w = QWidget()
         l = QVBoxLayout(w)
-        l.setContentsMargins(100, 50, 100, 50)
-        l.setAlignment(Qt.AlignCenter)
+        l.setContentsMargins(80, 40, 80, 40)
+        l.setSpacing(40)
         
-        # Hero Image/Logo
-        l.setSpacing(30)
+        # Hero Section
+        hero = QWidget()
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setSpacing(10)
         
-        l.addStretch()
-        title = QLabel("Welcome to EUI OMR Engine")
+        title = QLabel("Welcome to EUI OMR")
         title.setProperty("cssClass", "title")
-        l.addWidget(title, alignment=Qt.AlignCenter)
+        title.setAlignment(Qt.AlignCenter)
+        hero_layout.addWidget(title)
         
-        desc = QLabel("Streamlined optical mark recognition for academic excellence.")
-        desc.setProperty("cssClass", "subtitle")
-        l.addWidget(desc, alignment=Qt.AlignCenter)
+        desc = QLabel("Industrial-grade optical mark recognition for academic assessments.")
+        desc.setProperty("cssClass", "body")
+        desc.setAlignment(Qt.AlignCenter)
+        hero_layout.addWidget(desc)
         
-        lbl_drag = QLabel("<small><i>✨ Tip: You can seamlessly drag and drop a project folder anywhere here to load it.</i></small>")
-        lbl_drag.setStyleSheet("color: #475569; margin-top: 5px; margin-bottom: 10px;")
-        l.addWidget(lbl_drag, alignment=Qt.AlignCenter)
+        l.addWidget(hero)
         
-        actions = QHBoxLayout()
-        actions.setSpacing(20)
+        # Action Cards
+        actions_container = QWidget()
+        actions_layout = QHBoxLayout(actions_container)
+        actions_layout.setSpacing(24)
         
+        # New Project Card
         card_new = QWidget()
         card_new.setObjectName("card")
-        cl = QVBoxLayout(card_new)
-        cl.setContentsMargins(30,30,30,30)
-        cl.addWidget(QLabel("<b>New Project</b>"), alignment=Qt.AlignCenter)
-        cl.addWidget(QLabel("Start a fresh grading session from PDF scans."), alignment=Qt.AlignCenter)
-        btn_new = QPushButton("Create New Project")
-        btn_new.setProperty("cssClass", "primary")
-        btn_new.clicked.connect(self._create_project)
-        cl.addWidget(btn_new)
-        actions.addWidget(card_new)
+        nl = QVBoxLayout(card_new)
+        nl.setContentsMargins(32, 32, 32, 32)
+        nl.setSpacing(16)
         
+        icon_new = QLabel("📄")
+        icon_new.setStyleSheet("font-size: 32px;")
+        icon_new.setAlignment(Qt.AlignCenter)
+        nl.addWidget(icon_new)
+        
+        nl.addWidget(QLabel("<b>New Project</b>"), alignment=Qt.AlignCenter)
+        nl.addWidget(QLabel("Initialize a fresh grading session\nfrom PDF scans."), alignment=Qt.AlignCenter)
+        
+        btn_new = QPushButton("Create Project")
+        btn_new.setProperty("cssClass", "primary")
+        btn_new.setCursor(Qt.PointingHandCursor)
+        btn_new.clicked.connect(self._create_project)
+        nl.addWidget(btn_new)
+        actions_layout.addWidget(card_new)
+        
+        # Load Project Card
         card_load = QWidget()
         card_load.setObjectName("card")
-        cl2 = QVBoxLayout(card_load)
-        cl2.setContentsMargins(30,30,30,30)
-        cl2.addWidget(QLabel("<b>Open Project</b>"), alignment=Qt.AlignCenter)
-        cl2.addWidget(QLabel("Resume an existing grading session."), alignment=Qt.AlignCenter)
-        btn_load = QPushButton("Load Saved State")
+        ll = QVBoxLayout(card_load)
+        ll.setContentsMargins(32, 32, 32, 32)
+        ll.setSpacing(16)
+        
+        icon_load = QLabel("📂")
+        icon_load.setStyleSheet("font-size: 32px;")
+        icon_load.setAlignment(Qt.AlignCenter)
+        ll.addWidget(icon_load)
+        
+        ll.addWidget(QLabel("<b>Open Project</b>"), alignment=Qt.AlignCenter)
+        ll.addWidget(QLabel("Resume an existing grading session\nfrom a saved state."), alignment=Qt.AlignCenter)
+        
+        btn_load = QPushButton("Load State")
+        btn_load.setCursor(Qt.PointingHandCursor)
         btn_load.clicked.connect(self._load_project)
-        cl2.addWidget(btn_load)
-        actions.addWidget(card_load)
+        ll.addWidget(btn_load)
+        actions_layout.addWidget(card_load)
         
-        l.addLayout(actions)
+        l.addWidget(actions_container)
         
-        # CARD: Recent Projects
+        # Recent Projects
         if self.recent_projects:
-            card_recent = QWidget()
-            card_recent.setObjectName("card")
-            card_recent.setFixedWidth(640)
-            rl = QVBoxLayout(card_recent)
-            rl.setContentsMargins(20, 20, 20, 20)
+            recent_container = QWidget()
+            recent_container.setObjectName("card")
+            recent_container.setFixedWidth(600)
+            rl = QVBoxLayout(recent_container)
+            rl.setContentsMargins(24, 24, 24, 24)
             
             rl.addWidget(QLabel("<b>🕒 Recent Projects</b>"))
             self.recent_list = QListWidget()
-            self.recent_list.setFixedHeight(120)
+            self.recent_list.setFixedHeight(140)
             self.recent_list.addItems([str(Path(p).name) for p in self.recent_projects])
             self.recent_list.itemDoubleClicked.connect(self._on_recent_double_clicked)
             rl.addWidget(self.recent_list)
-            rl.addWidget(QLabel("Double-click to open quick-load."), alignment=Qt.AlignRight)
             
-            l.addWidget(card_recent, alignment=Qt.AlignCenter)
+            hint = QLabel("Double-click to quick-load project state.")
+            hint.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px;")
+            rl.addWidget(hint, alignment=Qt.AlignRight)
+            
+            l.addWidget(recent_container, alignment=Qt.AlignCenter)
         
         l.addStretch()
+        
+        tip = QLabel("✨ Tip: Drag and drop a project folder anywhere to load it.")
+        tip.setStyleSheet(f"color: {COLORS['text_secondary']}; font-style: italic;")
+        l.addWidget(tip, alignment=Qt.AlignCenter)
+        
         self.stack.addWidget(w)
 
     def _add_to_recent(self, path: str):
@@ -1011,134 +1048,159 @@ class MainWindow(QMainWindow):
         self._add_to_recent(folder)
         self._transition_to_setup()
 
-    # ---------------------------------------------------------
-    # VIEW 2: SETUP EXCEL AND ANSWER KEYS
-    # ---------------------------------------------------------
+        
     def build_setup_view(self):
         self.v_setup = QWidget()
+        self.v_setup.setObjectName("setup_container")
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.v_setup)
+        
+        # Main Layout
         l = QVBoxLayout(self.v_setup)
-        l.setContentsMargins(50, 30, 50, 30)
-        l.setSpacing(20)
+        l.setContentsMargins(40, 20, 40, 30)
+        l.setSpacing(16)
+        
+        header_sec = QWidget()
+        hl = QVBoxLayout(header_sec)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(4)
         
         title = QLabel("Session Setup")
         title.setProperty("cssClass", "title")
-        l.addWidget(title)
+        hl.addWidget(title)
         
-        # Card 1: Roster Configuration
+        desc = QLabel("Configure your roster, answer keys, and scan source.")
+        desc.setProperty("cssClass", "body")
+        hl.addWidget(desc)
+        l.addWidget(header_sec)
+        
+        # 1. Roster & Data Mapping
         card_roster = QWidget()
         card_roster.setObjectName("card")
         rl = QVBoxLayout(card_roster)
-        rl.setContentsMargins(25, 25, 25, 25)
+        rl.setContentsMargins(24, 16, 24, 16)
+        rl.setSpacing(12)
         
-        # Group 1: Data Sources (Card 1)
-        card_roster = QWidget()
-        card_roster.setObjectName("card")
-        rl = QVBoxLayout(card_roster)
-        rl.setContentsMargins(25, 20, 25, 20)
+        st1 = QLabel("1. Roster & Data Mapping")
+        st1.setProperty("cssClass", "header")
+        rl.addWidget(st1)
         
-        rl.addWidget(QLabel("<b>1. Data Sources & Roster</b>"))
         h_excel = QHBoxLayout()
-        self.btn_excel = QPushButton("Import Student Roster (Excel)")
+        h_excel.setSpacing(16)
+        self.btn_excel = QPushButton("Import Student Roster")
+        self.btn_excel.setCursor(Qt.PointingHandCursor)
         self.btn_excel.clicked.connect(self._import_excel)
         h_excel.addWidget(self.btn_excel)
-        self.lbl_excel = QLabel("No Excel File Selected")
-        self.lbl_excel.setStyleSheet("color: #38BDF8;")
+        
+        self.lbl_excel = QLabel("No file selected")
+        self.lbl_excel.setStyleSheet(f"color: {COLORS['accent']}; font-weight: 600;")
         h_excel.addWidget(self.lbl_excel)
         h_excel.addStretch()
         rl.addLayout(h_excel)
-
-        rl.addSpacing(10)
-        self.btn_keys = QPushButton("Manage & Scan Answer Keys (Forms A-F)")
-        self.btn_keys.setFixedHeight(40)
-        self.btn_keys.setFixedWidth(300)
-        self.btn_keys.clicked.connect(self._manage_keys)
-        rl.addWidget(self.btn_keys)
         
+        grid = QGridLayout()
+        grid.setSpacing(16)
+        grid.addWidget(QLabel("ID Column:"), 0, 0)
+        self.cb_id = QComboBox()
+        self.cb_id.setMinimumWidth(200)
+        grid.addWidget(self.cb_id, 0, 1)
+        
+        grid.addItem(QSpacerItem(40, 0, QSizePolicy.Expanding, QSizePolicy.Minimum), 0, 2)
+        
+        grid.addWidget(QLabel("Grade Output:"), 0, 3)
+        self.cb_out = QComboBox()
+        self.cb_out.setMinimumWidth(200)
+        grid.addWidget(self.cb_out, 0, 4)
+        rl.addLayout(grid)
         l.addWidget(card_roster)
-        l.addSpacing(10)
-
-        # Group 2: Configuration (Card 2)
+        
+        # 2. Exam Configuration
         card_exam = QWidget()
         card_exam.setObjectName("card")
         el = QVBoxLayout(card_exam)
-        el.setContentsMargins(25, 20, 25, 20)
+        el.setContentsMargins(24, 16, 24, 16)
+        el.setSpacing(12)
         
-        el.addWidget(QLabel("<b>2. Data Mapping & Exam Size</b>"))
-        h_set = QHBoxLayout()
-        h_set.addWidget(QLabel("Number of Questions (1-60):"))
+        st2 = QLabel("2. Exam Configuration")
+        st2.setProperty("cssClass", "header")
+        el.addWidget(st2)
+        
+        h_config = QHBoxLayout()
+        h_config.setSpacing(16)
+        h_config.addWidget(QLabel("Number of Questions:"))
         self.spin_q = QSpinBox()
-        self.spin_q.setRange(1, 60); self.spin_q.setValue(60)
-        h_set.addWidget(self.spin_q)
-        h_set.addSpacing(30)
-        h_set.addWidget(QLabel("ID Column:"))
-        self.cb_id = QComboBox()
-        h_set.addWidget(self.cb_id)
-        h_set.addSpacing(20)
-        h_set.addWidget(QLabel("Grade Column:"))
-        self.cb_out = QComboBox()
-        h_set.addWidget(self.cb_out)
-        h_set.addStretch()
-        el.addLayout(h_set)
+        self.spin_q.setRange(1, 100); self.spin_q.setValue(60)
+        self.spin_q.setFixedWidth(80)
+        h_config.addWidget(self.spin_q)
         
+        h_config.addSpacing(32)
+        
+        self.btn_keys = QPushButton("Manage Answer Keys")
+        self.btn_keys.setCursor(Qt.PointingHandCursor)
+        self.btn_keys.clicked.connect(self._manage_keys)
+        h_config.addWidget(self.btn_keys)
+        h_config.addStretch()
+        el.addLayout(h_config)
         l.addWidget(card_exam)
-        l.addSpacing(10)
-
-        # Group 3: Engine Calibration (The Final Step)
-        card_calib = QWidget()
-        card_calib.setObjectName("card")
-        cl = QVBoxLayout(card_calib)
-        cl.setContentsMargins(25, 20, 25, 20)
         
-        cl.addWidget(QLabel("<b>3. Engine Calibration (Optimize Detection)</b>"))
+        # 3. Scan Source
+        card_scan = QWidget()
+        card_scan.setObjectName("card")
+        sl = QVBoxLayout(card_scan)
+        sl.setContentsMargins(24, 16, 24, 16)
+        sl.setSpacing(12)
+        
+        st3 = QLabel("3. Scan Source (PDF)")
+        st3.setProperty("cssClass", "header")
+        sl.addWidget(st3)
         
         h_pdf = QHBoxLayout()
-        self.btn_select_pdf = QPushButton("📂 1. Select Student Scans (PDF)")
-        self.btn_select_pdf.setFixedWidth(250)
-        self.btn_select_pdf.setFixedHeight(40)
+        h_pdf.setSpacing(16)
+        self.btn_select_pdf = QPushButton("Select Student Scans")
+        self.btn_select_pdf.setCursor(Qt.PointingHandCursor)
         self.btn_select_pdf.clicked.connect(self._select_pdf)
         h_pdf.addWidget(self.btn_select_pdf)
         
-        self.lbl_setup_pdf = QLabel("No PDF Selected")
-        self.lbl_setup_pdf.setStyleSheet("color: #38BDF8; font-weight: bold;")
+        self.lbl_setup_pdf = QLabel("No PDF selected")
+        self.lbl_setup_pdf.setStyleSheet(f"color: {COLORS['accent']}; font-weight: 600;")
         h_pdf.addWidget(self.lbl_setup_pdf)
         h_pdf.addStretch()
-        cl.addLayout(h_pdf)
+        sl.addLayout(h_pdf)
         
-        cl.addSpacing(10)
+        hint = QLabel("Engine will automatically calibrate scan quality before processing.")
+        hint.setStyleSheet(f"color: {COLORS['text_secondary']}; font-style: italic;")
+        sl.addWidget(hint)
+        l.addWidget(card_scan)
         
-        # The Manual Calibration UI has been removed in favor of a silent automated background step
-        # that runs when the user clicks 'Start Grading'.
-        self.lbl_sens_status = QLabel("Engine will auto-calibrate scan quality before grading.")
-        self.lbl_sens_status.setStyleSheet("color: #94A3B8; font-style: italic;")
-        cl.addWidget(self.lbl_sens_status)
-        
-        l.addWidget(card_calib)
         l.addStretch()
         
-        # Bottom Buttons
-        btns = QHBoxLayout()
-        btn_back = QPushButton("← Global Settings")
-        btn_back.clicked.connect(lambda: self.stack.setCurrentIndex(0))
-        btns.addWidget(btn_back)
-        btns.addStretch()
+        # Footer Actions
+        footer = QWidget()
+        fl = QHBoxLayout(footer)
+        fl.setContentsMargins(0, 0, 0, 0)
         
-        self.btn_resume = QPushButton("📊 View Results Dashboard →")
-        self.btn_resume.setProperty("cssClass", "success")
-        self.btn_resume.setFixedHeight(50)
-        self.btn_resume.setFixedWidth(250)
+        self.btn_resume = QPushButton("View Current Dashboard")
+        self.btn_resume.setProperty("cssClass", "special")
+        self.btn_resume.setCursor(Qt.PointingHandCursor)
         self.btn_resume.clicked.connect(self._resume_to_dashboard)
         self.btn_resume.setVisible(False)
-        btns.addWidget(self.btn_resume)
-
-        self.btn_start = QPushButton("Start Fresh Batch →")
-        self.btn_start.setFixedHeight(50)
-        self.btn_start.setFixedWidth(200)
-        self.btn_start.clicked.connect(self._save_setup_and_continue)
-        self.btn_start.setEnabled(True)
-        btns.addWidget(self.btn_start)
-        l.addLayout(btns)
+        self.btn_resume.setFixedWidth(200)
+        fl.addWidget(self.btn_resume, alignment=Qt.AlignVCenter)
         
-        self.stack.addWidget(self.v_setup)
+        fl.addStretch()
+        
+        self.btn_start = QPushButton("Start Grading Process")
+        self.btn_start.setProperty("cssClass", "primary")
+        self.btn_start.setFixedHeight(48)
+        self.btn_start.setFixedWidth(220)
+        self.btn_start.setCursor(Qt.PointingHandCursor)
+        self.btn_start.clicked.connect(self._save_setup_and_continue)
+        fl.addWidget(self.btn_start)
+        l.addWidget(footer)
+        
+        self.stack.addWidget(scroll)
 
     def _transition_to_setup(self):
         # Prepopulate loaded data
@@ -1181,7 +1243,8 @@ class MainWindow(QMainWindow):
         self.btn_start.style().polish(self.btn_start)
 
         self.spin_q.setValue(self.pm.question_count)
-        self.stack.setCurrentIndex(1)
+        self.stack.slideInIdx(1)
+        self.sidebar.set_active(1)
         
     def _import_excel(self):
         file, _ = QFileDialog.getOpenFileName(self, "Select Roster", self.last_excel_path, "Excel (*.xlsx *.xls)")
@@ -1207,7 +1270,8 @@ class MainWindow(QMainWindow):
 
     def _resume_to_dashboard(self):
         self.lbl_pdf.setText("Results Loaded ✅")
-        self.stack.setCurrentIndex(2)
+        self.stack.slideInIdx(2)
+        self.sidebar.set_active(2)
 
     def _save_setup_and_continue(self):
         if not self.pm or not self.pm.excel_roster_path or not self.pm.student_pdf_path:
@@ -1219,8 +1283,9 @@ class MainWindow(QMainWindow):
         self.pm.question_count = self.spin_q.value()
         self.pm.save_state()
         
-        # Move to Processing View
-        self.stack.setCurrentIndex(2)
+        # Navigate to setup
+        self.stack.slideInIdx(2)
+        self.sidebar.set_active(2, easing=QEasingCurve.OutCubic)
         
         # Phase 1: Silent Automated Calibration (5 Random Pages)
         QTimer.singleShot(100, self._start_silent_calibration)
@@ -1271,66 +1336,91 @@ class MainWindow(QMainWindow):
     def build_processing_view(self):
         self.v_proc = QWidget()
         l = QVBoxLayout(self.v_proc)
-        l.setContentsMargins(30, 30, 30, 30)
-        l.setSpacing(20)
+        l.setContentsMargins(32, 32, 32, 32)
+        l.setSpacing(24)
         
-        # Dashboard Top Actions
-        card_actions = QWidget()
-        card_actions.setObjectName("card")
-        al = QHBoxLayout(card_actions)
-        al.setContentsMargins(20, 20, 20, 20)
+        # Header Info
+        header_area = QWidget()
+        hl = QHBoxLayout(header_area)
+        hl.setContentsMargins(0, 0, 0, 0)
         
-        al.addStretch()
-        self.lbl_pdf = QLabel("") # Start empty
-        al.addWidget(self.lbl_pdf)
-        l.addWidget(card_actions)
+        info_sec = QVBoxLayout()
+        self.lbl_pdf = QLabel("Ready to process scans")
+        self.lbl_pdf.setObjectName("header_title")
+        self.lbl_pdf.setStyleSheet(f"font-size: 18px; color: {COLORS['text_primary']};")
+        info_sec.addWidget(self.lbl_pdf)
         
-        # Main Dashboard Area
+        self.lbl_session = QLabel("Please Review the Conditions before Exporting") # Placeholder or session info
+        self.lbl_session.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        info_sec.addWidget(self.lbl_session)
+        hl.addLayout(info_sec)
+        
+        hl.addStretch()
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedWidth(300)
+        self.progress_bar.hide()
+        hl.addWidget(self.progress_bar)
+        l.addWidget(header_area)
+        
+        # Dashboard Content
         dashboard_content = QHBoxLayout()
+        dashboard_content.setSpacing(24)
         
-        # Left Side: Table
+        # Table Container
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["Page #", "Extracted ID", "Model", "Condition"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.table.setAlternatingRowColors(True)
+        self.table.setStyleSheet(f"QTableWidget {{ alternate-background-color: {COLORS['background']}; }}")
         self.table.itemChanged.connect(self._on_table_item_changed)
-        self.table.itemSelectionChanged.connect(self._on_selection_changed)
-        dashboard_content.addWidget(self.table, stretch=3)
+        self.table.cellDoubleClicked.connect(self._on_table_double_clicked)
+        dashboard_content.addWidget(self.table, stretch=1)
         
-        # Right Side: Status Sidebar
-        sidebar = QWidget()
-        sidebar.setFixedWidth(250)
-        sidebar.setObjectName("card")
-        sl = QVBoxLayout(sidebar)
+        # Sidebar Summary
+        sidebar_summary = QWidget()
+        sidebar_summary.setObjectName("card")
+        sidebar_summary.setFixedWidth(280)
+        sl = QVBoxLayout(sidebar_summary)
+        sl.setContentsMargins(24, 24, 24, 24)
+        sl.setSpacing(20)
+        
         sl.addWidget(QLabel("<b>Grading Summary</b>"))
-        self.stat_total = QLabel("Total: 0")
+        
+        stats_box = QVBoxLayout()
+        stats_box.setSpacing(12)
+        self.stat_total = QLabel("Total Sheets: 0")
         self.stat_success = QLabel("Resolved: 0")
         self.stat_errors = QLabel("Review Needed: 0")
-        sl.addWidget(self.stat_errors)
+        
+        for lbl in [self.stat_total, self.stat_success, self.stat_errors]:
+            lbl.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px;")
+            stats_box.addWidget(lbl)
+        sl.addLayout(stats_box)
+        
         sl.addStretch()
         
-        self.btn_export = QPushButton("EXPORT FINAL MARKS")
+        self.btn_export = QPushButton("Export Final Marks")
         self.btn_export.setProperty("cssClass", "primary")
-        self.btn_export.setFixedHeight(50)
+        self.btn_export.setFixedHeight(44)
+        self.btn_export.setCursor(Qt.PointingHandCursor)
         self.btn_export.setEnabled(False)
         self.btn_export.clicked.connect(self._export_to_excel)
         sl.addWidget(self.btn_export)
         
-        btn_back = QPushButton("Settings")
-        btn_back.clicked.connect(lambda: self.stack.setCurrentIndex(1))
-        sl.addWidget(btn_back)
+        btn_settings = QPushButton("Back to Setup")
+        btn_settings.setProperty("cssClass", "ghost")
+        btn_settings.setCursor(Qt.PointingHandCursor)
+        btn_settings.clicked.connect(lambda: self.stack.slideInIdx(1))
+        sl.addWidget(btn_settings)
         
-        dashboard_content.addWidget(sidebar)
-        l.addLayout(dashboard_content, stretch=1)
+        dashboard_content.addWidget(sidebar_summary)
+        l.addLayout(dashboard_content)
         
         self.stack.addWidget(self.v_proc)
         
-        self.progress_bar = QProgressBar()
-        self.progress_bar.hide()
-        l.addWidget(self.progress_bar)
-        
-        self.active_pdf_path = ""
         self.results_data: list[GradingResult] = [] 
-        self.table.cellDoubleClicked.connect(self._on_table_double_clicked)
         
         # Load existing results if any
         if self.pm and self.pm.last_results:
@@ -1445,13 +1535,13 @@ class MainWindow(QMainWindow):
         # Condition (Non-editable)
         if res.is_manual_fix:
             status = QTableWidgetItem("🛠️ Reviewed")
-            status.setForeground(QColor("#38BDF8")) # Cyan/Sky Blue for Review
+            status.setForeground(QColor(COLORS['accent']))
         elif res.id_error or res.version_error or len(res.question_errors) > 0:
             status = QTableWidgetItem("⚠️ Needs Review")
-            status.setForeground(Qt.red)
+            status.setForeground(QColor(COLORS['error']))
         else:
             status = QTableWidgetItem("✅ Success")
-            status.setForeground(Qt.green)
+            status.setForeground(QColor(COLORS['success']))
         status.setFlags(status.flags() & ~Qt.ItemIsEditable)
         self.table.setItem(row_idx, 3, status)
         
@@ -1517,9 +1607,16 @@ class MainWindow(QMainWindow):
         errors = sum(1 for r in self.results_data if (r.id_error or r.version_error or r.question_errors))
         success = total - errors
         
-        self.stat_total.setText(f"Total: {total}")
+        self.stat_total.setText(f"Total Sheets: {total}")
         self.stat_success.setText(f"Resolved: {success}")
         self.stat_errors.setText(f"Review Needed: {errors}")
+        
+        # Error text highlighting
+        if errors > 0:
+            self.stat_errors.setStyleSheet(f"color: {COLORS['error']}; font-weight: 600;")
+        else:
+            self.stat_errors.setStyleSheet(f"color: {COLORS['success']};")
+            
         self.btn_export.setEnabled(total > 0 and errors == 0)
         
     def _on_table_double_clicked(self, row, col):

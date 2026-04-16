@@ -1,0 +1,202 @@
+\documentclass[a4paper,12pt]{article}
+
+% --- Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{tcolorbox}
+\usepackage{enumitem}
+
+% --- Styling ---
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+\definecolor{accentblue}{HTML}{3B82F6}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=accentblue,
+    filecolor=magenta,      
+    urlcolor=accentblue,
+}
+
+\titleformat{\section}{\Large\bfseries\color{accentblue}}{\thesection}{1em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{1em}{}
+
+% --- Header/Footer ---
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{EUI OMR Engine Documentation}
+\rhead{v2.1.0}
+\cfoot{\thepage}
+
+% --- Document Info ---
+\title{
+    \includegraphics[width=0.2\textwidth]{assets/logo_premium.png}\\[1cm]
+    \textbf{EUI OMR Engine}\\
+    \large Industrial-Grade Optical Mark Recognition Platform\\
+    \vfill
+}
+\author{EUI Advanced Agentic Coding Team}
+\date{April 16, 2026}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\newpage
+
+\tableofcontents
+\newpage
+
+% -------------------------------------------------------------------
+\section{Abstract}
+% -------------------------------------------------------------------
+The EUI OMR Engine is a high-performance, independent Optical Mark Recognition (OMR) platform designed for large-scale academic assessments. Unlike traditional OMR systems that require proprietary hardware and specialized paper, this system utilizes Computer Vision (OpenCV) and modern desktop processing to extract data from standard A4 paper scanned by commercial office equipment. 
+
+The platform features a SaaS-inspired dashboard, an asynchronous multi-threaded processing engine, and a robust "Data Guard" project management system. This manual provides a holistic technical overview of the system architecture, underlying algorithms, and operational workflows.
+
+% -------------------------------------------------------------------
+\section{System Architecture}
+% -------------------------------------------------------------------
+The EUI OMR Engine follows a modified \textbf{Model-View-Controller (MVC)} pattern, optimized for low-latency asynchronous processing.
+
+\subsection{Architectural Components}
+\begin{itemize}
+    \item \textbf{Model Layer}: Represented by \texttt{ProjectManager} and \texttt{GradingResult} schemas. It handles the serialization of application state to \texttt{project\_state.json} and manages the physical mirroring of assets (PDFs, Excel rosters).
+    \item \textbf{View Layer}: A PySide6-based interface consisting of the \texttt{MainWindow}, a unified \texttt{Sidebar}, and a \texttt{SlidingStackedWidget}. High-performance UI transitions are handled via an integrated "Sliding Fade" animation engine.
+    \item \textbf{Engine Layer (Controller)}: The OMR pipeline (\texttt{OMRGrader} and \texttt{calibrate.py}) which executes the Computer Vision logic.
+    \item \textbf{Worker Layer}: Asynchronous \texttt{QThread} implementations (\texttt{PDFGraderWorker}, \texttt{AutoTuneWorker}) that offload heavy computations, preventing GUI freezing.
+\end{itemize}
+
+\subsection{Concurrency Model}
+To maintain 60FPS UI responsiveness, the engine utilizes a signal-slot mechanism for worker communication.
+\begin{enumerate}
+    \item \textbf{Producer}: The UI initiates a thread with target scanning parameters.
+    \item \textbf{Consumer}: The worker loads the PDF via \texttt{PyMuPDF}, converts pages to pixel buffers, and passes them to the Grader.
+    \item \textbf{Feedback}: Results and progress are emitted back to the main thread for real-time dashboard updates.
+\end{enumerate}
+
+% -------------------------------------------------------------------
+\section{Computer Vision \& OMR Pipeline}
+% -------------------------------------------------------------------
+The engine's reliability stems from a rigorous image-processing pipeline that transforms raw scanner output into clean, predictable data structures.
+
+\subsection{Corner Detection \& Orthorectification}
+The system uses \texttt{detect\_corners()} in \texttt{calibrate.py} to align sheets.
+\begin{itemize}
+    \item \textbf{Marker Heuristic}: Detects four physical markers. One "Anchor" (Rectangle, aspect ratio $\approx 2.0$) and three "Squares" (aspect $\approx1.0$).
+    \item \textbf{Orientation Logic}: By identifying the geometric center of the four markers and the specific location of the Anchor, the system detects and automatically corrects 180-degree rotations.
+    \item \textbf{Perspective Warp}: Uses \texttt{cv2.getPerspectiveTransform} to map the sheet into a fixed A4 resolution (1654x2339 pixels) at 200 DPI.
+\end{itemize}
+
+\subsection{Extraction Algorithms}
+Once aligned, the \texttt{OMRGrader} processes specific Regions of Interest (ROIs).
+\begin{enumerate}
+    \item \textbf{Thresholding}: Applies \texttt{ADAPTIVE\_THRESH\_GAUSSIAN\_C} to handle varying lighting and scanner noise.
+    \item \textbf{Grid Slicing}: Divides ROIs into sub-cells while applying a 3-pixel internal padding safety margin to ignore bubble borders.
+    \item \textbf{ID Peak Detection}: Instead of simple binary thresholding, the ID logic uses a Peak Detection algorithm. It compares signal strength across columns to distinguish actual pencil marks from messy erasures or faint artifacts.
+\end{enumerate}
+
+% -------------------------------------------------------------------
+\section{UI/UX Design \& User Flow}
+% -------------------------------------------------------------------
+\subsection{Dashboard Interface}
+The UI is built on a "SaaS-style" 8px grid system with a premium dark-mode aesthetic (\texttt{\#121212}).
+\begin{itemize}
+    \item \textbf{Sidebar}: A collapsible navigation hub providing one-click access to Home, Setup, and Dashboard views.
+    \item \textbf{View Transitions}: Implements a \texttt{SlidingStackedWidget} that performs synchronized position and opacity animations, ensuring a high-end feel.
+    \item \textbf{Card-Based Layout}: Information is grouped into interactive containers, reducing cognitive load for the operator.
+\end{itemize}
+
+\subsection{Systemic Calibration}
+The "Phase 1: Auto-Calibration" step (\texttt{AutoTuneWorker}) automatically selects random sample pages from the target PDF to find the optimal mark sensitivity. This eliminates manual configuration for different paper weights or pencil darkness.
+
+% -------------------------------------------------------------------
+\section{Data Management \& Flow}
+% -------------------------------------------------------------------
+\subsection{Project Shadowing (Data Guard)}
+To ensure project portability, the \texttt{ProjectManager} implements a "Shadowing" policy:
+\begin{enumerate}
+    \item User selects a PDF or Excel file from any location on their computer.
+    \item The system \textit{mirrors} these files into the project's \texttt{/imports} directory.
+    \item All internal references use \textbf{Relative Paths}.
+\end{enumerate}
+\textit{Design Decision}: This allows users to move the entire project folder across devices (via USB or Cloud) without breaking file links or losing session data.
+
+\subsection{Memory Management (Disk Caching)}
+During large batch processing (e.g., 500+ sheets), the engine avoids RAM exhaustion by:
+\begin{itemize}
+    \item Slicing the visual crops from the sheet images.
+    \item Writing these crops to the \texttt{/crops} directory as compressed JPEGs.
+    \item Clearing the pixel buffers from memory immediately after save.
+\end{itemize}
+
+% -------------------------------------------------------------------
+\section{Usage Guide}
+% -------------------------------------------------------------------
+\subsection{Initial Setup}
+\begin{enumerate}
+    \item \textbf{Import Roster}: Select an Excel file. The system will detect columns; assign the "ID Column" and a target "Grade Output" column.
+    \item \textbf{Define Keys}: Managed via the "Answer Key Manager". Each version (A-F) can be configured manually or "scanned" from a model sheet.
+    \item \textbf{Target PDF}: Load the scan batch.
+\end{enumerate}
+
+\subsection{Processing and Review}
+The "Dashboard" shows real-time progress. Any sheet with low-confidence marks, double marks, or invalid IDs is flagged with a \textbf{Needs Review} status. The operator can double-click any row to open the \texttt{ReviewModal}, which displays the actual physical crops side-by-side with the extracted values for verification.
+
+% -------------------------------------------------------------------
+\section{Installation \& Requirements}
+% -------------------------------------------------------------------
+\subsection{Dependencies}
+The system requires Python 3.9+ and the following libraries:
+\begin{lstlisting}[language=bash]
+pip install PySide6 opencv-python numpy PyMuPDF pandas openpyxl
+\end{lstlisting}
+
+\subsection{Production Build}
+To generate a standalone Windows executable (\texttt{.exe}):
+\begin{lstlisting}[language=bash]
+pyinstaller EUI_OMR_Engine.spec --clean
+\end{lstlisting}
+
+% -------------------------------------------------------------------
+\section{Known Limitations \& Future Work}
+% -------------------------------------------------------------------
+\begin{itemize}
+    \item \textbf{Handwritten OCR}: Currently, the system identifies the ID marks but does not perform OCR on the handwritten signature area; this area is provided only for visual verification.
+    \item \textbf{Sheet Skew}: While 180-degree rotation and perspective warping are supported, extreme folds in the paper may cause local nonlinear distortions.
+    \item \textbf{Feature Roadmap}: Implementation of a cloud-sync module for multi-station grading environments.
+\end{itemize}
+
+\end{document}

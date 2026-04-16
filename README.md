@@ -4,9 +4,9 @@ EUI OMR Engine is a professional, independent Optical Mark Recognition (OMR) sys
 
 ## 📸 Visual Overview
 
-| Welcome & Project Selection | Session Setup & Calibration | Results Dashboard (Dark Mode) |
+| Welcome & Project Selection | Session Setup & Calibration | Results Dashboard |
 |:---:|:---:|:---:|
-| ![Welcome](assets/screenshots/01_welcome.png) | ![Setup](assets/screenshots/02_setup.png) | ![Dashboard](assets/screenshots/03_dashboard.png) |
+| ![Welcome](assets/screenshots/welcome.png) | ![Setup](assets/screenshots/setup.png) | ![Dashboard](assets/screenshots/dashboard.png) |
 
 ## 🎯 The Problem & Our Solution
 
@@ -20,13 +20,13 @@ Traditional OMR systems often trap educational institutions in expensive ecosyst
 ## 🌟 Key Features
 
 - **Hardware & Media Independence**: Works with standard **A4 paper** and any **document scanner** (PDF output). No specialized hardware required.
-- **Automatic Model Detection**: Scans and processes mixed batches of exam versions (e.g., Form A, B, C) simultaneously. The system identifies the model and applies the correct answer key automatically.
-- **Intelligent Page Orientation**: Uses image processing to automatically detect and correct page rotation, ensuring accuracy even if sheets are scanned upside-down.
+- **Premium SaaS Dashboard**: A world-class interface featuring a **Sidebar-Dashboard** architecture, industrial dark-mode aesthetic (#121212), and optimized for the academic workflow.
+- **Smooth Animation Engine**: Implements a high-performance **Sliding Fade** system for fluid view transitions at a buttery-smooth 60 FPS.
+- **Automatic Model Detection**: Scans and processes mixed batches of exam versions (e.g., Form A, B, C) simultaneously.
+- **Intelligent Page Orientation**: Automatically corrects page rotation, ensuring accuracy even if sheets are scanned upside-down.
 - **Integrated Manual Review**: A dedicated UI for resolving ambiguities (faint marks, ID errors, or version mismatches). Strict validation prevents data export until all flagged items are human-verified.
-- **Modern Dashboard UI**: A premium, high-performance interface built with PySide6, featuring Real-time statistics and **Drag & Drop** project loading.
-- **Cost-Effective & Independent**: Eliminates per-sheet fees and annual subscription models. The software runs locally, ensuring total data privacy and institutional independence.
-- **Data Guard (PDF Mirroring)**: Automatically clones student scans into the project directory to ensure the grading session remains portable and safe.
-- **Excel Integration**: Seamlessly maps student data from rosters and exports final marks directly to Excel files.
+- **Global Data Guard (PDF Mirroring)**: Automatically clones student scans into the project directory to ensure the grading session remains portable and safe.
+- **Excel & Academic Integration**: Seamlessly maps student data from rosters and exports final marks directly to Excel files.
 
 ## 🛠️ Technical Stack
 - **Vision**: `opencv-python`, `PyMuPDF` (Computer Vision & PDF Processing)
