@@ -30,10 +30,15 @@ def run_headless_verification():
     print("Auto-tuning sensitivity...")
     grader = OMRGrader(CONFIG_PATH)
     
-    # Sample first 3 pages for tuning
+    # Select 5 random pages for tuning
+    import random
     doc = fitz.open(str(PDF_PATH))
+    num_pages = len(doc)
+    num_samples = min(5, num_pages)
+    indices = random.sample(range(num_pages), num_samples)
+    
     sample_imgs = []
-    for i in range(min(3, len(doc))):
+    for i in indices:
         p = doc.load_page(i)
         px = p.get_pixmap(matrix=fitz.Matrix(200/72, 200/72), alpha=False)
         im = np.frombuffer(px.samples, dtype=np.uint8).reshape(px.h, px.w, px.n)

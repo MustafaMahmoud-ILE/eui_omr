@@ -92,11 +92,14 @@ class AutoTuneWorker(QThread):
     finished = Signal(int) # Returns the best sensitivity
     error = Signal(str)
 
-    def __init__(self, pdf_path: str, config_path: str, expected_questions: int):
+    def __init__(self, pdf_path: str, config_path: str, expected_questions: int = 60, num_samples: int = 3, sample_indices: list[int] | None = None):
         super().__init__()
         self.pdf_path = pdf_path
         self.config_path = config_path
         self.expected_questions = expected_questions
+        self.num_samples = num_samples
+        self.sample_indices = sample_indices
+        self._is_cancelled = False
 
     def run(self):
         try:
@@ -106,11 +109,13 @@ class AutoTuneWorker(QThread):
                 self.error.emit("PDF is empty")
                 return
             
-            # Sample up to 3 pages for a more 'strong' and robust analysis
-            sample_images = []
-            num_samples = min(3, total_pages)
+            # Use specific indices if provided (e.g. random samples), otherwise default to head
+            target_indices = self.sample_indices if self.sample_indices is not None else range(min(self.num_samples, len(doc)))
             
-            for i in range(num_samples):
+            sample_images = []
+            for i in target_indices:
+                if i >= len(doc): continue 
+                
                 page = doc.load_page(i)
                 zoom = 200/72
                 pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)

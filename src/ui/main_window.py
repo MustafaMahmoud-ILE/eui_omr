@@ -1082,27 +1082,11 @@ class MainWindow(QMainWindow):
         
         cl.addSpacing(10)
         
-        h_sens = QHBoxLayout()
-        self.btn_auto_sens = QPushButton("✨ 2. Intelligent Auto-Calibration")
-        self.btn_auto_sens.setToolTip("Analyzes the first page to find the perfect sensitivity automatically.")
-        self.btn_auto_sens.setFixedWidth(250)
-        self.btn_auto_sens.setFixedHeight(40)
-        self.btn_auto_sens.clicked.connect(self._on_auto_optimize)
-        self.btn_auto_sens.setEnabled(False) 
-        h_sens.addWidget(self.btn_auto_sens)
-        
-        self.slider_sens = QSlider(Qt.Horizontal)
-        self.slider_sens.setRange(40, 95); self.slider_sens.setValue(75)
-        self.slider_sens.setTickPosition(QSlider.TicksBelow); self.slider_sens.setTickInterval(5)
-        self.slider_sens.valueChanged.connect(self._on_sensitivity_changed)
-        h_sens.addWidget(self.slider_sens)
-        
-        self.lbl_sens_val = QLabel("75% (Recommended)")
-        self.lbl_sens_val.setFixedWidth(150)
-        h_sens.addWidget(self.lbl_sens_val)
-        cl.addLayout(h_sens)
-        
-        cl.addWidget(QLabel("<small><i>Tip: Use Auto-Calibration if marks are faint or background is noisy.</i></small>"))
+        # The Manual Calibration UI has been removed in favor of a silent automated background step
+        # that runs when the user clicks 'Start Grading'.
+        self.lbl_sens_status = QLabel("Engine will auto-calibrate scan quality before grading.")
+        self.lbl_sens_status.setStyleSheet("color: #94A3B8; font-style: italic;")
+        cl.addWidget(self.lbl_sens_status)
         
         l.addWidget(card_calib)
         l.addStretch()
@@ -1173,8 +1157,6 @@ class MainWindow(QMainWindow):
         self.btn_start.style().polish(self.btn_start)
 
         self.spin_q.setValue(self.pm.question_count)
-        self.slider_sens.setValue(self.pm.mark_sensitivity)
-        self._on_sensitivity_changed(self.pm.mark_sensitivity)
         self.stack.setCurrentIndex(1)
         
     def _import_excel(self):
@@ -1217,8 +1199,48 @@ class MainWindow(QMainWindow):
         # Move to Processing View
         self.stack.setCurrentIndex(2)
         
-        # AUTO-START: Since everything is configured, start grading immediately
-        QTimer.singleShot(100, self._start_grading)
+        # Phase 1: Silent Automated Calibration (5 Random Pages)
+        QTimer.singleShot(100, self._start_silent_calibration)
+
+    def _start_silent_calibration(self):
+        """Phase 1: Automatically calibrate engine sensitivity before starting the batch."""
+        import random
+        import fitz
+        
+        self.lbl_pdf.setText("Phase 1/2: Optimizing for scan quality (5 random samples)...")
+        self.btn_export.setEnabled(False)
+        
+        try:
+            doc = fitz.open(self.active_pdf_path)
+            num_pages = len(doc)
+            num_samples = min(5, num_pages)
+            
+            # Select 5 random indices distributed across the PDF
+            indices = random.sample(range(num_pages), num_samples)
+            doc.close()
+            
+            self.tune_worker = AutoTuneWorker(
+                self.active_pdf_path, 
+                self.config_path, 
+                self.spin_q.value(),
+                sample_indices=indices # We'll update the worker to accept specific indices
+            )
+            self.tune_worker.finished.connect(self._on_silent_tune_finished)
+            self.tune_worker.error.connect(lambda e: self._on_error("Calibration Error", e))
+            self.tune_worker.start()
+        except Exception as e:
+            self._on_error("Calibration Error", f"Failed to access PDF for calibration: {e}")
+
+    def _on_silent_tune_finished(self, best_sens):
+        """Phase 2: Transition seamlessly to actual grading."""
+        self.pm.mark_sensitivity = best_sens
+        self.pm.save_state()
+        
+        if self.pm.logger:
+            self.pm.logger.info(f"Silent auto-calibration complete. Best sensitivity: {best_sens}")
+            
+        self.lbl_pdf.setText("Phase 2/2: Processing Student Sheets...")
+        self._start_grading()
 
     # ---------------------------------------------------------
     # VIEW 3: GRADING / PROCESSING
@@ -1313,31 +1335,8 @@ class MainWindow(QMainWindow):
             self.active_pdf_path = str(safe_pdf_path)
             
             self.lbl_setup_pdf.setText(f"Selected: {safe_pdf_path.name}")
-            self.btn_auto_sens.setEnabled(True)
             self._validate_setup_ready()
 
-    def _on_auto_optimize(self):
-        if not self.active_pdf_path:
-            return
-            
-        self.btn_auto_sens.setText("✨ Calibrating...")
-        self.btn_auto_sens.setEnabled(False)
-        
-        self.tune_worker = AutoTuneWorker(
-            self.active_pdf_path, 
-            self.config_path, 
-            self.spin_q.value()
-        )
-        self.tune_worker.finished.connect(self._on_auto_tune_finished)
-        self.tune_worker.error.connect(lambda e: QMessageBox.critical(self, "Calibration Error", e))
-        self.tune_worker.start()
-
-    def _on_auto_tune_finished(self, best_sens):
-        self.slider_sens.setValue(best_sens)
-        self.btn_auto_sens.setText("✨ Smart Calibration")
-        self.btn_auto_sens.setEnabled(True)
-        QMessageBox.information(self, "Calibration Complete", 
-                               f"Optimized sensitivity to {best_sens}% based on the sample page.")
 
     def _start_grading(self):
         if not self.active_pdf_path: return
@@ -1540,38 +1539,6 @@ class MainWindow(QMainWindow):
             self.undo_stack.pop()
             if not self.undo_stack: self.btn_undo.setEnabled(False)
 
-    def _on_auto_optimize(self):
-        """Analyzes multiple sample pages of the PDF to find the real optimal sensitivity."""
-        if not self.active_pdf_path: return
-        
-        self.btn_auto_sens.setEnabled(False)
-        self.btn_auto_sens.setText("✨ Analyzing Samples (1-3)...")
-        
-        # Real Engine Calibration using the Worker
-        self.tune_worker = AutoTuneWorker(
-            self.active_pdf_path, 
-            get_config_path(), 
-            self.spin_q.value()
-        )
-        self.tune_worker.finished.connect(self._finish_auto_optimize)
-        self.tune_worker.error.connect(self._on_tune_error)
-        self.tune_worker.start()
-
-    def _on_tune_error(self, message):
-        self.btn_auto_sens.setEnabled(True)
-        self.btn_auto_sens.setText("✨ Intelligent Auto-Calibration")
-        QMessageBox.warning(self, "Calibration Error", f"Failed to auto-tune: {message}")
-
-    def _finish_auto_optimize(self, best_sens):
-        # Now we apply the REAL calculated value from the engine analysis
-        self.slider_sens.setValue(best_sens)
-        self.btn_auto_sens.setEnabled(True)
-        self.btn_auto_sens.setText("✨ Intelligent Auto-Calibration")
-        
-        QMessageBox.information(
-            self, "Auto-Calibration Complete", 
-            f"Optimization Finished!\n\nSensitivity has been tuned to {best_sens}% based on the analysis of scan background and clarity."
-        )
 
     def _manage_keys(self):
         if not self.pm: return
