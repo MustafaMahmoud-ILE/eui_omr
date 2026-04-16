@@ -136,13 +136,11 @@ def detect_corners(image: NDArray[np.uint8]) -> NDArray[np.float32]:
     if len(candidates) < 4:
         raise RuntimeError(f"Found only {len(candidates)} markers. Need 4.")
 
-    # 1. Identify the Anchor (Rectangle) and the Squares globally
-    # Sort candidates by area to get the most prominent ones if we have > 4
+    # Sort candidates by area to get the most prominent ones
     candidates.sort(key=lambda x: x[2], reverse=True)
     top_4 = candidates[:4]
     
-    # Anchor has aspect ~2.0, Squares have aspect ~1.0
-    # We find the one that is most 'rectangular' (farthest from 1.0)
+    # Extract points
     top_4_sorted_by_aspect = sorted(top_4, key=lambda x: x[1], reverse=True)
     anchor_cand = top_4_sorted_by_aspect[0]
     square_cands = top_4_sorted_by_aspect[1:]
@@ -151,8 +149,18 @@ def detect_corners(image: NDArray[np.uint8]) -> NDArray[np.float32]:
     square_pts = [_contour_centroid(s[0]) for s in square_cands]
     all_pts = [anchor_pt] + square_pts
     
+    # --- Geometric Validation ---
+    # Ensure points are distributed well. Calculate area of the quad formed by these points.
+    pts_arr = np.array(all_pts, dtype=np.float32)
+    quad_hull = cv2.convexHull(pts_arr.reshape(-1, 1, 2))
+    quad_area = cv2.contourArea(quad_hull)
+    
+    # A valid OMR sheet should have markers spanning most of the page.
+    # We expect the quad area to be > 30% of the image area.
+    if quad_area < (image_area * 0.3):
+        raise RuntimeError("Detected markers do not span the page. Possible false positive or blank page.")
+
     # 2. Determine Orientation based on Anchor position
-    # Find the bounding box of the 4 detected points
     xs = [p[0] for p in all_pts]; ys = [p[1] for p in all_pts]
     center_x = sum(xs) / 4.0; center_y = sum(ys) / 4.0
     

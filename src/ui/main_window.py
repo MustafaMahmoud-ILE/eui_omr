@@ -1453,8 +1453,19 @@ class MainWindow(QMainWindow):
             self._validate_setup_ready()
 
 
+    def _stop_worker(self):
+        """Safely stops and disposes of current workers to prevent resource leaks."""
+        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            try:
+                self.worker.terminate()
+                self.worker.wait(500)
+            except: pass
+        self.worker = None
+
     def _start_grading(self):
         if not self.active_pdf_path: return
+        
+        self._stop_worker()
         
         if self.pm and self.pm.logger:
             self.pm.logger.info(f"Starting fresh grading batch for PDF: {self.active_pdf_path}")

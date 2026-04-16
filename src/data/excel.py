@@ -49,38 +49,41 @@ class ExcelManager:
         # 2. Build Breakdown Sheet Data
         breakdown_rows = []
         
-        # Convert student_id col to strings in roster for matching
-        df_roster[student_id_col] = df_roster[student_id_col].astype(str).str.strip()
+        # Create a mapping of normalized IDs in roster for fast lookup
+        # We store (normalized_id -> original_index)
+        id_map = {}
+        for idx, val in df_roster[student_id_col].items():
+            norm = self._normalize_id(val)
+            if norm:
+                id_map[norm] = idx
 
         for res in results_data:
-            sid = str(res["student_id"]).strip()
+            sid = self._normalize_id(res["student_id"])
             version = res["version"]
             
             # Calculate Score
             score = 0
             ans_key = answer_keys.get(version)
             if ans_key and not res.get("id_error") and not res.get("version_error"):
-                for q in range(1, question_count + 1):
-                    correct_answers = ans_key.answers.get(q, [])
-                    student_answers = res["answers"].get(q, [])
-                    
-                    # We give a point if there is an exact match.
-                    # Or if any of the student answers match any of the correct?
-                    # The prompt says: "allow multiple correct answers".
-                    # Usually, if A and B are accepted, and student picks A, it's correct.
-                    # If student picks A and B (double mark), is it correct? The grader prevents double marks unless configured.
-                    # Award a point if ANY of the student's marks match ANY of the accepted correct answers.
-                    if any(a in correct_answers for a in student_answers):
-                        score += 1
+                # Handle both AnswerKey objects and raw dicts from project state
+                key_data = ans_key.answers if hasattr(ans_key, "answers") else ans_key
+                if isinstance(key_data, dict):
+                    for q in range(1, question_count + 1):
+                        correct_answers = key_data.get(q, [])
+                        student_answers = res["answers"].get(q, [])
                         
-            # Update original roster
-            if sid and sid != "None" and "?" not in sid and "*" not in sid:
-                df_roster.loc[df_roster[student_id_col] == sid, grade_col] = score
+                        if any(a in correct_answers for a in student_answers):
+                            score += 1
+                        
+            # Update original roster using normalized mapping
+            if sid in id_map:
+                row_idx = id_map[sid]
+                df_roster.at[row_idx, grade_col] = score
                 
             # Build detailed row
             d_row = {
                 "Page": res["page_number"],
-                "Student ID": sid,
+                "Student ID": res["student_id"],
                 "Version": version,
                 "Score": score,
                 "ID Error": "YES" if res["id_error"] else "No",
