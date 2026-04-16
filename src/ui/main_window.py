@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QListWidget
 )
 
+import cv2
 import numpy as np
 
 from src.core.project import ProjectManager
