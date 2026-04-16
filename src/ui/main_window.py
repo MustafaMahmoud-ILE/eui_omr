@@ -265,6 +265,16 @@ class ReviewModal(QDialog):
             self.resize(parent.size())
         else:
             self.setMinimumSize(1000, 700)
+            
+        # 1. Initialize Transient In-memory crops (Loaded only for this modal session)
+        self.temp_id_crop = None
+        self.temp_ver_crop = None
+        self.temp_sig_crop = None
+        self.temp_q_crops = {}
+        self.error_keys = [] 
+        
+        # 2. Load images into transients BEFORE building panels
+        self._ensure_images_loaded()
         
         main_layout = QHBoxLayout(self)
         
@@ -309,21 +319,11 @@ class ReviewModal(QDialog):
         
         main_layout.addWidget(self.scroll, stretch=2)
         
-        # Track inputs for applying later
         self.id_input: QLineEdit | None = None
         self.ver_input: QComboBox | None = None
         self.q_inputs: dict[int, QComboBox] = {}
         
-        # Transient In-memory crops (Loaded only for this modal session)
-        self.temp_id_crop = None
-        self.temp_ver_crop = None
-        self.temp_sig_crop = None
-        self.temp_q_crops = {}
-        
-        self.error_keys = [] 
-        
         self._populate_errors()
-        self._ensure_images_loaded()
 
     def _ensure_images_loaded(self):
         """Loads images from disk cache if paths exist, otherwise falls back to PDF extraction."""
@@ -1298,18 +1298,7 @@ class MainWindow(QMainWindow):
         self.stat_total = QLabel("Total: 0")
         self.stat_success = QLabel("Resolved: 0")
         self.stat_errors = QLabel("Review Needed: 0")
-        self.stat_errors.setStyleSheet("color: #F59E0B;")
         sl.addWidget(self.stat_errors)
-        sl.addSpacing(20)
-        
-        # Identification Preview Area
-        sl.addWidget(QLabel("<b>ID Preview</b>"))
-        self.lbl_id_preview = QLabel("Select a row...")
-        self.lbl_id_preview.setFixedSize(210, 300)
-        self.lbl_id_preview.setStyleSheet("background-color: #020617; border: 1px solid #334155; border-radius: 8px;")
-        self.lbl_id_preview.setAlignment(Qt.AlignCenter)
-        sl.addWidget(self.lbl_id_preview)
-        
         sl.addStretch()
         
         self.btn_export = QPushButton("EXPORT FINAL MARKS")
@@ -1463,35 +1452,8 @@ class MainWindow(QMainWindow):
         self._update_stats()
 
     def _on_selection_changed(self):
-        """Loads a quick preview of the student ID crop for the selected row."""
-        rows = self.table.selectionModel().selectedRows()
-        if not rows:
-            self.lbl_id_preview.setPixmap(QPixmap())
-            self.lbl_id_preview.setText("Select a row...")
-            return
-            
-        row_idx = rows[0].row()
-        if row_idx >= len(self.results_data): return
-        
-        res = self.results_data[row_idx]
-        
-        # Try loading from disk if memory is cleared
-        img = None
-        if res.id_crop_path:
-            proj_dir = Path(self.active_pdf_path).parent.parent
-            p = proj_dir / "crops" / res.id_crop_path
-            if p.exists():
-                img = cv2.imread(str(p))
-        
-        if img is None:
-            # Fallback to in-memory if it was just processed
-            img = res._id_crop
-            
-        if img is not None:
-            self._set_pixmap(self.lbl_id_preview, img)
-        else:
-            self.lbl_id_preview.setPixmap(QPixmap())
-            self.lbl_id_preview.setText("Image not found")
+        """No longer used for live preview, but kept as a slot if needed for other UI updates."""
+        pass
 
     def _set_pixmap(self, label, ndarray):
         if ndarray is None:
