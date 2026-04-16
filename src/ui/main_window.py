@@ -304,7 +304,13 @@ class ReviewModal(QDialog):
         self.ver_input: QComboBox | None = None
         self.q_inputs: dict[int, QComboBox] = {}
         
-        self.error_keys = [] # list of (type, data) e.g., ("id", None) or ("question", q_num)
+        # Transient In-memory crops (Loaded only for this modal session)
+        self.temp_id_crop = None
+        self.temp_ver_crop = None
+        self.temp_sig_crop = None
+        self.temp_q_crops = {}
+        
+        self.error_keys = [] 
         
         self._populate_errors()
 
@@ -317,20 +323,20 @@ class ReviewModal(QDialog):
             crops_dir = proj_dir / "crops"
             
             if (crops_dir / self.res.id_crop_path).exists():
-                self.res._id_crop = cv2.imread(str(crops_dir / self.res.id_crop_path))
+                self.temp_id_crop = cv2.imread(str(crops_dir / self.res.id_crop_path))
                 
             if self.res.version_crop_path and (crops_dir / self.res.version_crop_path).exists():
-                self.res._version_crop = cv2.imread(str(crops_dir / self.res.version_crop_path))
+                self.temp_ver_crop = cv2.imread(str(crops_dir / self.res.version_crop_path))
                 
             if self.res.signature_crop_path and (crops_dir / self.res.signature_crop_path).exists():
-                self.res._signature_crop = cv2.imread(str(crops_dir / self.res.signature_crop_path))
+                self.temp_sig_crop = cv2.imread(str(crops_dir / self.res.signature_crop_path))
                 
             for q_num, p_name in self.res.question_crop_paths.items():
                 if (crops_dir / p_name).exists():
-                    self.res._question_crops[q_num] = cv2.imread(str(crops_dir / p_name))
+                    self.temp_q_crops[q_num] = cv2.imread(str(crops_dir / p_name))
             
             # If we successfully loaded from disk, we can skip the expensive PDF extraction
-            if self.res._id_crop is not None:
+            if self.temp_id_crop is not None:
                 return
 
         # 2. Fallback to PDF extraction (Slow)
@@ -349,10 +355,10 @@ class ReviewModal(QDialog):
                 gr = OMRGrader(self.config_path)
                 crops = gr.extract_crops_only(img, self.question_count)
                 
-                self.res._id_crop = crops.get("id_crop")
-                self.res._version_crop = crops.get("version_crop")
-                self.res._signature_crop = crops.get("signature_crop")
-                self.res._question_crops = crops.get("question_crops")
+                self.temp_id_crop = crops.get("id_crop")
+                self.temp_ver_crop = crops.get("version_crop")
+                self.temp_sig_crop = crops.get("signature_crop")
+                self.temp_q_crops = crops.get("question_crops")
             except Exception as e:
                 print(f"Modal Image Load Error: {e}")
 
@@ -386,8 +392,8 @@ class ReviewModal(QDialog):
         l.addWidget(lbl_title)
         
         lbl_sig = QLabel()
-        if self.res._signature_crop is not None:
-            lbl_sig.setPixmap(cv2_to_qpixmap(self.res._signature_crop))
+        if self.temp_sig_crop is not None:
+            lbl_sig.setPixmap(cv2_to_qpixmap(self.temp_sig_crop))
         l.addWidget(QLabel("Student's Handwritten Name:"))
         l.addWidget(lbl_sig)
         
@@ -398,8 +404,8 @@ class ReviewModal(QDialog):
         
         # Ensure the image can be scrolled if too large
         self.lbl_id = QLabel()
-        if self.res._id_crop is not None:
-            pix = cv2_to_qpixmap(self.res._id_crop)
+        if self.temp_id_crop is not None:
+            pix = cv2_to_qpixmap(self.temp_id_crop)
             self.lbl_id.setPixmap(pix)
         
         l.addWidget(self.lbl_id)
@@ -434,8 +440,8 @@ class ReviewModal(QDialog):
         lbl_title.setProperty("cssClass", "title")
         l.addWidget(lbl_title)
         lbl_v = QLabel()
-        if self.res._version_crop is not None:
-            lbl_v.setPixmap(cv2_to_qpixmap(self.res._version_crop))
+        if self.temp_ver_crop is not None:
+            lbl_v.setPixmap(cv2_to_qpixmap(self.temp_ver_crop))
         l.addWidget(lbl_v)
         
         l.addSpacing(15)
@@ -461,8 +467,8 @@ class ReviewModal(QDialog):
         l.addWidget(lbl_title)
         
         lbl_img = QLabel()
-        if q_num in self.res._question_crops:
-            lbl_img.setPixmap(cv2_to_qpixmap(self.res._question_crops[q_num]))
+        if q_num in self.temp_q_crops:
+            lbl_img.setPixmap(cv2_to_qpixmap(self.temp_q_crops[q_num]))
         l.addWidget(lbl_img)
         
         l.addSpacing(15)

@@ -156,6 +156,12 @@ class OMRGrader:
                 cv2.imwrite(str(p), crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 result.question_crop_paths[q_num] = p.name
 
+            # CRITICAL: Clear in-memory crops after save to release RAM
+            result._id_crop = None
+            result._version_crop = None
+            result._signature_crop = None
+            result._question_crops = {}
+
         return result
 
     def extract_crops_only(self, image: NDArray[np.uint8], expected_questions: int = 60) -> dict:
