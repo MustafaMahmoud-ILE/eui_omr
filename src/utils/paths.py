@@ -14,12 +14,25 @@ def get_resource_path(relative_path: str) -> str:
     return os.path.join(base_path, relative_path)
 
 def get_config_path(filename: str = "config.json") -> str:
-    """ Returns the path to a config file that should live beside the EXE/Script, not inside the bundle. """
+    """ 
+    Priority Path Logic:
+    1. Beside the EXE (User's external config)
+    2. Internal Bundle (Default fallback)
+    3. Current Working Directory (Dev mode)
+    """
+    # 1. Path beside the EXE (External override)
     if hasattr(sys, 'frozen'):
-        # We are running as an EXE
-        base_dir = os.path.dirname(sys.executable)
-    else:
-        # We are running as a script
-        base_dir = os.getcwd()
+        beside_exe = Path(sys.executable).parent / filename
+        if beside_exe.exists():
+            return str(beside_exe)
+            
+    # 2. Path inside the PyInstaller bundle (Bundled default)
+    try:
+        internal_bundle = Path(sys._MEIPASS) / filename
+        if internal_bundle.exists():
+            return str(internal_bundle)
+    except Exception:
+        pass
         
-    return str(Path(base_dir) / filename)
+    # 3. Fallback to CWD
+    return str(Path.cwd() / filename)
