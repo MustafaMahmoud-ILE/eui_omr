@@ -2,6 +2,12 @@
 
 EUI OMR Engine is a professional, independent Optical Mark Recognition (OMR) system designed to eliminate the high costs and logistical constraints of traditional grading hardware. It provides a standardized solution for extracting data from scanned bubble sheets using regular office equipment.
 
+## 📸 Visual Overview
+
+| Welcome & Project Selection | Session Setup & Calibration | Results Dashboard (Dark Mode) |
+|:---:|:---:|:---:|
+| ![Welcome](assets/screenshots/01_welcome.png) | ![Setup](assets/screenshots/02_setup.png) | ![Dashboard](assets/screenshots/03_dashboard.png) |
+
 ## 🎯 The Problem & Our Solution
 
 Traditional OMR systems often trap educational institutions in expensive ecosystems:

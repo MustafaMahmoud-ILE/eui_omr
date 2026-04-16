@@ -309,14 +309,39 @@ class ReviewModal(QDialog):
         self._populate_errors()
 
     def _ensure_images_loaded(self):
-        """Extracts images from PDF if they aren't already in memory (cache)."""
+        """Loads images from disk cache if paths exist, otherwise falls back to PDF extraction."""
+        # 1. Try Disk Cache First
+        if self.res.id_crop_path:
+            # We assume paths are relative to the project directory
+            proj_dir = Path(self.pdf_path).parent.parent
+            crops_dir = proj_dir / "crops"
+            
+            if (crops_dir / self.res.id_crop_path).exists():
+                self.res._id_crop = cv2.imread(str(crops_dir / self.res.id_crop_path))
+                
+            if self.res.version_crop_path and (crops_dir / self.res.version_crop_path).exists():
+                self.res._version_crop = cv2.imread(str(crops_dir / self.res.version_crop_path))
+                
+            if self.res.signature_crop_path and (crops_dir / self.res.signature_crop_path).exists():
+                self.res._signature_crop = cv2.imread(str(crops_dir / self.res.signature_crop_path))
+                
+            for q_num, p_name in self.res.question_crop_paths.items():
+                if (crops_dir / p_name).exists():
+                    self.res._question_crops[q_num] = cv2.imread(str(crops_dir / p_name))
+            
+            # If we successfully loaded from disk, we can skip the expensive PDF extraction
+            if self.res._id_crop is not None:
+                return
+
+        # 2. Fallback to PDF extraction (Slow)
         if self.res._id_crop is None and self.pdf_path:
             try:
                 import fitz
                 from src.core.grader import OMRGrader
                 doc = fitz.open(self.pdf_path)
                 page = doc.load_page(self.res.page_number - 1)
-                pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), alpha=False)
+                # Ensure we use 200 DPI for fallback extraction as well!
+                pix = page.get_pixmap(matrix=fitz.Matrix(200/72, 200/72), alpha=False)
                 img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
                 if pix.n == 3: img = img[:, :, ::-1].copy()
                 doc.close()
@@ -1345,7 +1370,8 @@ class MainWindow(QMainWindow):
             self.active_pdf_path, 
             self.config_path, 
             expected_questions=self.pm.question_count,
-            sensitivity=self.pm.mark_sensitivity
+            sensitivity=self.pm.mark_sensitivity,
+            crops_dir=self.pm.crops_dir
         )
         self.worker.progress_updated.connect(self._on_progress)
         self.worker.page_processed.connect(self._on_page_processed)

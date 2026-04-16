@@ -17,7 +17,28 @@ except ImportError as e:
     print(f"Error loading modules: {e}")
     sys.exit(1)
 
+import traceback
+
+def global_exception_handler(exctype, value, tb):
+    """Global hook to catch any unhandled exceptions and show a user-friendly dialog."""
+    error_msg = "".join(traceback.format_exception(exctype, value, tb))
+    print(error_msg, file=sys.stderr)
+    
+    # Try to show a GUI message box if QApplication exists
+    if QApplication.instance():
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Critical)
+        msg.setWindowTitle("Application Error")
+        msg.setText("A critical error has occurred and the application must close.")
+        msg.setDetailedText(error_msg)
+        msg.setInformativeText("Please take a screenshot of this error and report it to academic support.")
+        msg.exec()
+    sys.exit(1)
+
 def main():
+    # Install the global exception hook
+    sys.excepthook = global_exception_handler
+    
     app = QApplication(sys.argv)
     
     # Enforce Single-Instance Application
@@ -35,10 +56,13 @@ def main():
     # In One-Dir mode, we check for config.json next to the EXE
     config_path = get_config_path("config.json")
 
-    window = MainWindow(config_path)
-    window.show()
-
-    sys.exit(app.exec())
+    try:
+        window = MainWindow(config_path)
+        window.show()
+        sys.exit(app.exec())
+    except Exception:
+        # Catch errors during window initialization as well
+        global_exception_handler(*sys.exc_info())
 
 if __name__ == "__main__":
     main()

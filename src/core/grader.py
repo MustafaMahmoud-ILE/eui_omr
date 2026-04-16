@@ -81,7 +81,7 @@ class OMRGrader:
             raise FileNotFoundError(f"Could not read image at {image_path}")
         return self.process_array(image, page_num)
 
-    def process_array(self, image: NDArray[np.uint8], page_num: int, expected_questions: int = 60) -> GradingResult | None:
+    def process_array(self, image: NDArray[np.uint8], page_num: int, expected_questions: int = 60, save_dir: Path | None = None) -> GradingResult | None:
         try:
             corners = detect_corners(image)
         except RuntimeError:
@@ -129,6 +129,33 @@ class OMRGrader:
             _version_crop=ver_roi,
             _question_crops=q_crops
         )
+
+        # --- DISK CACHING LOGIC ---
+        if save_dir and save_dir.is_dir():
+            # Save ID crop
+            if id_roi is not None:
+                p = save_dir / f"p{page_num}_id.jpg"
+                cv2.imwrite(str(p), id_roi, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                result.id_crop_path = p.name
+            
+            # Save Version crop
+            if ver_roi is not None:
+                p = save_dir / f"p{page_num}_ver.jpg"
+                cv2.imwrite(str(p), ver_roi, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                result.version_crop_path = p.name
+                
+            # Save Signature crop
+            if sig_crop is not None:
+                p = save_dir / f"p{page_num}_sig.jpg"
+                cv2.imwrite(str(p), sig_crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                result.signature_crop_path = p.name
+                
+            # Save Question crops
+            for q_num, crop in q_crops.items():
+                p = save_dir / f"p{page_num}_q{q_num}.jpg"
+                cv2.imwrite(str(p), crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                result.question_crop_paths[q_num] = p.name
+
         return result
 
     def extract_crops_only(self, image: NDArray[np.uint8], expected_questions: int = 60) -> dict:

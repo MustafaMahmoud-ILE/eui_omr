@@ -13,6 +13,8 @@ class ProjectManager:
     def __init__(self, project_dir: str | Path):
         self.project_dir = Path(project_dir)
         self.state_file = self.project_dir / "project_state.json"
+        # Directory for cached OMR crops
+        self.crops_dir = self.project_dir / "crops"
         
         # State variables
         self.project_name: str = "Untitled Project"
@@ -53,6 +55,8 @@ class ProjectManager:
         self.project_dir.mkdir(parents=True, exist_ok=True)
         # Create an 'imports' subfolder to safeguard local copies of user files
         (self.project_dir / "imports").mkdir(exist_ok=True)
+        # Create 'crops' subfolder for caching vision results
+        self.crops_dir.mkdir(exist_ok=True)
         self.save_state()
 
     def import_excel_file(self, original_file_path: str | Path) -> Path:

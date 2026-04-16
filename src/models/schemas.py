@@ -30,22 +30,28 @@ class GradingResult:
     # E.g. {1: ["C"], 2: [], 3: ["A", "B"]}
     answers: Dict[int, List[str]]
     
-    # Validation Flags for Manual Review
+    # Validation Flags for Manual Review (Must follow non-default fields)
     id_error: bool = False
     version_error: bool = False
-    question_errors: List[int] = field(default_factory=list) # List of question numbers that need review
-    manually_reviewed_questions: List[int] = field(default_factory=list) # Track questions the user manually touched
+    question_errors: List[int] = field(default_factory=list)
+    manually_reviewed_questions: List[int] = field(default_factory=list)
     is_manual_fix: bool = False
-    
-    # Cropped OpenCV image numpy arrays (kept in memory, NOT serialised to disk)
-    # These are picked up by the UI to show the professor what exactly went wrong.
+
+    # Storage Paths for Disk-Caching (Paths relative to project root)
+    # If these are set, the UI loads from disk instead of RAM.
+    id_crop_path: Optional[str] = None
+    version_crop_path: Optional[str] = None
+    signature_crop_path: Optional[str] = None
+    question_crop_paths: Dict[int, str] = field(default_factory=dict)
+
+    # In-memory OpenCV image numpy arrays (used only during the active worker loop)
     _id_crop: Any = field(default=None, repr=False)
     _signature_crop: Any = field(default=None, repr=False)
     _version_crop: Any = field(default=None, repr=False)
     _question_crops: Dict[int, Any] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict:
-        """Serializes standard metadata. Explicitly excludes in-memory image arrays to prevent JSON overhead and errors."""
+        """Serializes standard metadata and disk paths."""
         return {
             "page_number": int(self.page_number),
             "student_id": self.student_id,
@@ -55,24 +61,31 @@ class GradingResult:
             "version_error": bool(self.version_error),
             "question_errors": [int(q) for q in self.question_errors],
             "manually_reviewed_questions": [int(q) for q in self.manually_reviewed_questions],
-            "is_manual_fix": bool(self.is_manual_fix)
+            "is_manual_fix": bool(self.is_manual_fix),
+            "id_crop_path": self.id_crop_path,
+            "version_crop_path": self.version_crop_path,
+            "signature_crop_path": self.signature_crop_path,
+            "question_crop_paths": {int(k): v for k, v in self.question_crop_paths.items()}
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> 'GradingResult':
-        """Reconstructs a result from JSON-compatible dictionary with high fault tolerance."""
+        """Reconstructs a result from JSON-compatible dictionary."""
         try:
             return cls(
                 page_number=int(data.get("page_number", 0)),
                 student_id=data.get("student_id"),
                 version=data.get("version"),
-                # JSON keys are strings, cast back to int
                 answers={int(k): v for k, v in data.get("answers", {}).items()},
                 id_error=bool(data.get("id_error", False)),
                 version_error=bool(data.get("version_error", False)),
                 question_errors=[int(q) for q in data.get("question_errors", [])],
                 manually_reviewed_questions=[int(q) for q in data.get("manually_reviewed_questions", [])],
-                is_manual_fix=bool(data.get("is_manual_fix", False))
+                is_manual_fix=bool(data.get("is_manual_fix", False)),
+                id_crop_path=data.get("id_crop_path"),
+                version_crop_path=data.get("version_crop_path"),
+                signature_crop_path=data.get("signature_crop_path"),
+                question_crop_paths={int(k): v for k, v in data.get("question_crop_paths", {}).items()}
             )
         except Exception as e:
             # Re-raise with context for the logger to pick up

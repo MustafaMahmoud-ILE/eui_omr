@@ -15,12 +15,13 @@ class PDFGraderWorker(QThread):
     error_occurred = Signal(str, str)            # Title, Message
     finished = Signal()
 
-    def __init__(self, pdf_path: str, config_path: str, expected_questions: int = 60, sensitivity: int = 75):
+    def __init__(self, pdf_path: str, config_path: str, expected_questions: int = 60, sensitivity: int = 75, crops_dir: Path | None = None):
         super().__init__()
         self.pdf_path = pdf_path
         self.config_path = config_path
         self.expected_questions = expected_questions
         self.sensitivity = sensitivity
+        self.crops_dir = crops_dir
         self._is_cancelled = False
         self._is_paused = False
 
@@ -41,7 +42,7 @@ class PDFGraderWorker(QThread):
                     break
                     
                 page = doc.load_page(i)
-                zoom = 2.0
+                zoom = 200/72 # Align with internal 200 DPI calibration (A4: 1654x2339)
                 mat = fitz.Matrix(zoom, zoom)
                 pix = page.get_pixmap(matrix=mat, alpha=False)
                 
@@ -55,7 +56,8 @@ class PDFGraderWorker(QThread):
                     res: GradingResult | None = grader.process_array(
                         img_data, 
                         page_num=i+1, 
-                        expected_questions=self.expected_questions
+                        expected_questions=self.expected_questions,
+                        save_dir=self.crops_dir
                     )
                     
                     if res is None:
@@ -110,7 +112,7 @@ class AutoTuneWorker(QThread):
             
             for i in range(num_samples):
                 page = doc.load_page(i)
-                zoom = 2.0
+                zoom = 200/72
                 pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
                 img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
                 if pix.n == 3: 

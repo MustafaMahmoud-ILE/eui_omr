@@ -26,19 +26,33 @@ def run_headless_verification():
         return
     gt_df = pd.read_excel(GT_EXCEL)
     
-    # 2. Initialize Grader
-    grader = OMRGrader(CONFIG_PATH, sensitivity=75)
+    # 2. Initialize Grader & Auto-Tune
+    print("Auto-tuning sensitivity...")
+    grader = OMRGrader(CONFIG_PATH)
+    
+    # Sample first 3 pages for tuning
+    doc = fitz.open(str(PDF_PATH))
+    sample_imgs = []
+    for i in range(min(3, len(doc))):
+        p = doc.load_page(i)
+        px = p.get_pixmap(matrix=fitz.Matrix(200/72, 200/72), alpha=False)
+        im = np.frombuffer(px.samples, dtype=np.uint8).reshape(px.h, px.w, px.n)
+        if px.n == 3: im = im[:, :, ::-1].copy()
+        sample_imgs.append(im)
+    
+    best_sens = grader.optimize_sensitivity(sample_imgs, expected_questions=5)
+    print(f"Optimal Sensitivity Found: {best_sens}")
+    grader = OMRGrader(CONFIG_PATH, sensitivity=best_sens)
     
     # 3. Process PDF
-    doc = fitz.open(str(PDF_PATH))
     total_pages = len(doc)
     results = []
 
-    print(f"Processing {total_pages} pages using OMRGrader engine...")
+    print(f"Processing {total_pages} pages using OMRGrader engine (200 DPI)...")
     
     for i in range(total_pages):
         page = doc.load_page(i)
-        pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), alpha=False)
+        pix = page.get_pixmap(matrix=fitz.Matrix(200/72, 200/72), alpha=False)
         img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
         if pix.n == 3: img = img[:, :, ::-1].copy()
         
@@ -77,7 +91,7 @@ def run_headless_verification():
         
     print(f"- Questions Accuracy  : {correct_q}/{total_q} ({(correct_q/total_q)*100:.1f}%)")
     print("="*40)
-    print("\nVerification complete! If accuracy is < 100%, consider adjusting the Sensitivity slider in the GUI.")
+    print("\nVerification complete!")
 
 if __name__ == "__main__":
     run_headless_verification()
