@@ -266,8 +266,6 @@ class ReviewModal(QDialog):
         else:
             self.setMinimumSize(1000, 700)
         
-        self._ensure_images_loaded()
-        
         main_layout = QHBoxLayout(self)
         
         # --- LEFT PANE ---
@@ -325,6 +323,7 @@ class ReviewModal(QDialog):
         self.error_keys = [] 
         
         self._populate_errors()
+        self._ensure_images_loaded()
 
     def _ensure_images_loaded(self):
         """Loads images from disk cache if paths exist, otherwise falls back to PDF extraction."""
