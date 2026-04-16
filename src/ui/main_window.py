@@ -1127,7 +1127,7 @@ class MainWindow(QMainWindow):
         if self.pm.student_pdf_path:
             self.active_pdf_path = self.pm.student_pdf_path
             self.lbl_setup_pdf.setText(f"Target: {Path(self.active_pdf_path).name}")
-            self.btn_auto_sens.setEnabled(True)
+            self._validate_setup_ready()
             
         self._validate_setup_ready()
             
@@ -1193,7 +1193,6 @@ class MainWindow(QMainWindow):
         self.pm.student_id_col = self.cb_id.currentText()
         self.pm.grade_output_col = self.cb_out.currentText()
         self.pm.question_count = self.spin_q.value()
-        self.pm.mark_sensitivity = self.slider_sens.value()
         self.pm.save_state()
         
         # Move to Processing View
@@ -1319,9 +1318,6 @@ class MainWindow(QMainWindow):
                 self._update_table_row(res)
             self.btn_export.setEnabled(True)
 
-    def _on_sensitivity_changed(self, val):
-        rec = " (Recommended)" if val == 75 else ""
-        self.lbl_sens_val.setText(f"{val}%{rec}")
 
     def _select_pdf(self):
         file, _ = QFileDialog.getOpenFileName(self, "Select Student PDF Scans", self.last_pdf_path, "PDF Documents (*.pdf)")
