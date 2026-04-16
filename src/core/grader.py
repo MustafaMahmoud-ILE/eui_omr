@@ -102,10 +102,10 @@ class OMRGrader:
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
 
-        # Blank page filter (Are there barely any pencil marks/print left?)
-        density = cv2.countNonZero(thresh) / (self.a4_width * self.a4_height)
-        if density < 0.005:
-            return None # Safely skip blank side of duplex paper
+        # Enhanced Quality & Content Validation
+        if not self.is_valid_omr_sheet(warped, thresh):
+            # This is either a blank page, wrong orientation, or an instruction sheet
+            return None 
 
         # Extract textual fields
         student_id, id_err, id_roi = self._extract_student_id(thresh, color_warped)
@@ -194,6 +194,59 @@ class OMRGrader:
         except Exception:
             return {}
 
+    def is_valid_omr_sheet(self, color_img: NDArray, thresh: NDArray) -> bool:
+        """Heuristic check to ensure this is an actual vertical OMR sheet with data."""
+        h, w = thresh.shape[:2]
+        
+        # 1. Reject Landscape or small images
+        if w > h: return False
+        
+        # 2. Check density in the Question Columns area
+        # If the expected question regions are almost entirely white, it's likely a cover sheet.
+        density = cv2.countNonZero(thresh) / (w * h)
+        if density < 0.006: return False # Absolute minimum print density (markers + some lines)
+        
+        # 3. Marker Alignment Check (Optional, detect_corners already handles most of this)
+        return True
+
+    def optimize_sensitivity_preprocessed(self, samples: list[tuple[NDArray, NDArray]], expected_questions: int = 60) -> int:
+        """Find optimal sensitivity using images that are already warped and binary-thresholded."""
+        if not samples: return 75
+        
+        original_threshold = self.FILL_THRESHOLD
+        best_sens = 75
+        min_total_score = float('inf')
+        
+        for sens in range(45, 101, 5):
+            self.FILL_THRESHOLD = max(0.01, min(0.99, (100 - sens) / 100.0))
+            total_score_for_this_sens = 0.0
+            
+            for thresh, color_warped in samples:
+                sid, _, _ = self._extract_student_id(thresh, color_warped)
+                ver, _, _ = self._extract_version(thresh, color_warped)
+                ans, _, _ = self._extract_answers(thresh, color_warped, expected_questions)
+                
+                num_conflicts = sid.count("*") + (1 if ver == "*" else 0)
+                num_blanks = sid.count("?") + (1 if ver == "?" else 0)
+                
+                for q in range(1, expected_questions + 1):
+                    q_ans = ans.get(q, [])
+                    if len(q_ans) != 1: 
+                        # Flags both blanks and conflicts as issues to minimize
+                        total_score_for_this_sens += 1.0
+                
+                total_score_for_this_sens += (num_conflicts * 2.5) + (num_blanks * 1.0)
+                
+            if total_score_for_this_sens < min_total_score:
+                min_total_score = total_score_for_this_sens
+                best_sens = sens
+            elif total_score_for_this_sens == min_total_score:
+                if abs(sens - 75) < abs(best_sens - 75):
+                    best_sens = sens
+                    
+        self.FILL_THRESHOLD = original_threshold
+        return best_sens
+
     def optimize_sensitivity(self, images: list[NDArray[np.uint8]], expected_questions: int = 60) -> int:
         """Find the optimal sensitivity level by minimizing errors across multiple sample pages."""
         processed_samples = []
@@ -269,19 +322,41 @@ class OMRGrader:
         
         id_str = ""
         has_error = False
+        
         for col_idx in range(8):
-            filled_rows = []
+            # Collate all fill values in this column for Peak Detection analysis
+            col_fills = []
             for row_idx in range(10):
-                if grid[row_idx][col_idx] > self.FILL_THRESHOLD:
-                    filled_rows.append(row_idx)
+                col_fills.append(grid[row_idx][col_idx])
             
-            if len(filled_rows) == 1:
-                id_str += str(filled_rows[0])
-            elif len(filled_rows) == 0:
-                id_str += "?" 
+            # Peak Detection Analysis
+            sorted_indices = np.argsort(col_fills)[::-1] # Indices of rows from most-filled to least-filled
+            best_idx = sorted_indices[0]
+            best_val = col_fills[best_idx]
+            runner_up_val = col_fills[sorted_indices[1]]
+            
+            # Scenario A: Clean Single Fill (High Confidence)
+            if best_val > self.FILL_THRESHOLD and runner_up_val < (self.FILL_THRESHOLD * 0.4):
+                id_str += str(best_idx)
+                
+            # Scenario B: Faint Pencil (Low absolute, but distinct Peak)
+            elif best_val > (self.FILL_THRESHOLD * 0.5) and best_val > (runner_up_val * 2.0):
+                # We identify a clear "Peak" even though it's below the global threshold
+                id_str += str(best_idx)
+                
+            # Scenario C: Messy erasure (Two high fills, but one is dominant)
+            elif best_val > self.FILL_THRESHOLD and best_val > (runner_up_val * 1.8):
+                # The student likely crossed out or erased the second one
+                id_str += str(best_idx)
+                
+            # Scenario D: Blank
+            elif best_val < (self.FILL_THRESHOLD * 0.3):
+                id_str += "?"
                 has_error = True
+                
+            # Scenario E: Conflict (Two close contenders)
             else:
-                id_str += "*" 
+                id_str += "*"
                 has_error = True
                 
         return id_str, has_error, color_roi

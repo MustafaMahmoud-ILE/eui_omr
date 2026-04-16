@@ -30,22 +30,41 @@ def run_headless_verification():
     print("Auto-tuning sensitivity...")
     grader = OMRGrader(CONFIG_PATH)
     
-    # Select 5 random pages for tuning
+    # Smart Sampling: Mirror the AutoTuneWorker's retry logic
     import random
-    doc = fitz.open(str(PDF_PATH))
-    num_pages = len(doc)
-    num_samples = min(5, num_pages)
-    indices = random.sample(range(num_pages), num_samples)
+    from src.core.calibrate import detect_corners, warp_to_a4
+    import cv2
     
-    sample_imgs = []
-    for i in indices:
-        p = doc.load_page(i)
+    doc = fitz.open(str(PDF_PATH))
+    total_pages = len(doc)
+    valid_samples = []
+    
+    # Try up to 15 random pages to find 5 valid OMR sheets
+    pool = random.sample(range(total_pages), min(15, total_pages))
+    for idx in pool:
+        if len(valid_samples) >= 5: break
+        
+        p = doc.load_page(idx)
         px = p.get_pixmap(matrix=fitz.Matrix(200/72, 200/72), alpha=False)
         im = np.frombuffer(px.samples, dtype=np.uint8).reshape(px.h, px.w, px.n)
         if px.n == 3: im = im[:, :, ::-1].copy()
-        sample_imgs.append(im)
-    
-    best_sens = grader.optimize_sensitivity(sample_imgs, expected_questions=5)
+        
+        try:
+            corners = detect_corners(im)
+            warped = warp_to_a4(im, corners, grader.a4_width, grader.a4_height)
+            gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+            thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 51, 15)
+            
+            if grader.is_valid_omr_sheet(warped, thresh):
+                valid_samples.append((thresh, warped))
+        except Exception:
+            continue
+
+    if not valid_samples:
+        print("Error: Could not find any valid OMR sheets for tuning.")
+        return
+
+    best_sens = grader.optimize_sensitivity_preprocessed(valid_samples, expected_questions=5)
     print(f"Optimal Sensitivity Found: {best_sens}")
     grader = OMRGrader(CONFIG_PATH, sensitivity=best_sens)
     

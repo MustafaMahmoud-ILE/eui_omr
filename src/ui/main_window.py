@@ -295,7 +295,7 @@ class ReviewModal(QDialog):
         left_layout.addSpacing(10)
         
         # Action Buttons
-        self.btn_save = QPushButton("Accept Changes & Continue")
+        self.btn_save = QPushButton("Accept Changes and Continue")
         self.btn_save.setProperty("cssClass", "primary")
         self.btn_save.setEnabled(False) # Wait for input
         self.btn_save.clicked.connect(self.accept)

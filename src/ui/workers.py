@@ -1,6 +1,8 @@
 import fitz  # PyMuPDF
 import numpy as np
 import traceback
+import random
+import cv2
 from PySide6.QtCore import QThread, Signal
 from pathlib import Path
 
@@ -103,32 +105,56 @@ class AutoTuneWorker(QThread):
 
     def run(self):
         try:
+            from src.core.calibrate import detect_corners, warp_to_a4
             doc = fitz.open(self.pdf_path)
             total_pages = len(doc)
             if total_pages == 0:
                 self.error.emit("PDF is empty")
                 return
             
-            # Use specific indices if provided (e.g. random samples), otherwise default to head
-            target_indices = self.sample_indices if self.sample_indices is not None else range(min(self.num_samples, len(doc)))
+            grader = OMRGrader(self.config_path)
+            valid_samples = []
             
-            sample_images = []
-            for i in target_indices:
-                if i >= len(doc): continue 
+            # Smart Sampling Pool: up to 20 attempts to find needed valid portrait sheets
+            max_attempts = min(20, total_pages)
+            candidate_pool = random.sample(range(total_pages), max_attempts)
+            
+            for idx in candidate_pool:
+                if self._is_cancelled: break
+                if len(valid_samples) >= self.num_samples: break
                 
-                page = doc.load_page(i)
-                zoom = 200/72
-                pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
-                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
-                if pix.n == 3: 
-                    img = img[:, :, ::-1].copy()
-                sample_images.append(img)
+                try:
+                    page = doc.load_page(idx)
+                    zoom = 200/72
+                    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+                    if pix.n == 3: img = img[:, :, ::-1].copy()
+                    
+                    # 1. Detect and Warp
+                    corners = detect_corners(img)
+                    warped = warp_to_a4(img, corners, grader.a4_width, grader.a4_height)
+                    
+                    # 2. Binary Threshold for analysis
+                    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+                    thresh = cv2.adaptiveThreshold(
+                        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                        cv2.THRESH_BINARY_INV, blockSize=51, C=15
+                    )
+                    
+                    # 3. Content Validation
+                    if grader.is_valid_omr_sheet(warped, thresh):
+                        valid_samples.append((thresh, warped))
+                except Exception:
+                    continue
             
             doc.close()
+            
+            if not valid_samples:
+                self.error.emit("No valid OMR sheets found. Check orientations/blanks.")
+                return
 
-            grader = OMRGrader(self.config_path)
-            # Pass the ACTUAL list of images for a truly intelligent optimization
-            best_sens = grader.optimize_sensitivity(sample_images, self.expected_questions)
+            # Perform high-confidence optimization on VALID samples
+            best_sens = grader.optimize_sensitivity_preprocessed(valid_samples, self.expected_questions)
             self.finished.emit(best_sens)
         except Exception as e:
             traceback.print_exc()
