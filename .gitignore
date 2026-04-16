@@ -17,11 +17,14 @@ build/
 dist/
 *.spec
 
-# PDF & Data (Local tests)
-*.pdf
-*.xlsx
+# PDF & Data (Local projects - keep ignored)
 project_state.json
-config.json
+crops/
+
+# Allow Tracking of Configuration and Core Test Assets
+!config.json
+!test_data_gen/*.pdf
+!test_data_gen/*.xlsx
 
 # IDEs
 .vscode/
