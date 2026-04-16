@@ -1,0 +1,137 @@
+\documentclass[10pt, a4paper]{article}
+
+% Packages
+\usepackage[top=1cm, bottom=1cm, left=1.2cm, right=1.2cm]{geometry}
+\usepackage{tikz}
+\usepackage{pgffor}
+\usepackage{graphicx} 
+\usepackage{array}
+
+% Command for a bubble with text inside
+\newcommand{\bubble}[1]{%
+	\tikz[baseline=(char.base)]{
+		\node[shape=circle, draw, thick, inner sep=0.5pt, minimum size=0.42cm, text=black!80] (char) {\scriptsize \textsf{#1}};
+	}%
+}
+
+% Command for standard OpenCV corner square (0.7 x 0.7)
+\newcommand{\cornerblock}{%
+	\tikz{\fill[black] (0,0) rectangle (0.7,0.7);}
+}
+
+% Command for OpenCV Top-Left orientation mark (Rectangle 1.4 x 0.7)
+\newcommand{\topleftcornerblock}{%
+	\tikz{\fill[black] (0,0) rectangle (1.4,0.7);}
+}
+
+\begin{document}
+	\pagestyle{empty}
+	
+	% Top Alignment Marks (Asymmetric for rotation detection)
+	\noindent
+	\topleftcornerblock \hfill \cornerblock
+	
+	\vspace{0.2cm}
+	
+	% ================= HEADER SECTION =================
+	\noindent
+	\begin{minipage}[t]{0.55\textwidth}
+		% LOGO
+		% Replace 'logo.png' with your actual logo file name
+		\includegraphics[width=4cm, height=1.2cm, keepaspectratio]{logo} \quad 
+		\raisebox{0.4cm}{\large \textbf{Egypt University Of Informatics}} 
+		
+		\vspace{0.4cm}
+		
+		% Student Info (Compact)
+		\renewcommand{\arraystretch}{1.2}
+		\scriptsize
+		\begin{tabular}{@{}p{2.5cm} p{6cm}@{}}
+			\textbf{Student Name:} & \hrulefill \\
+			\vspace{0.25cm}&\\
+			\textbf{Course:} & \hrulefill \\
+			\vspace{0.25cm}&\\
+			\textbf{Date:} & \hrulefill \\
+			
+		\end{tabular}
+		
+		\vspace{0.3cm}
+		% Tiny Instructions (Minimalist)
+		\noindent
+		\tiny \textit{Instructions: Use a No. 2 pencil. Fill circles completely. Erase clearly to change.}
+	\end{minipage}
+	\hfill
+	% ================= ID & VERSION SECTION =================
+	\begin{minipage}[t]{0.42\textwidth}
+		\begin{minipage}[t]{0.2\textwidth}
+			\centering
+			\scriptsize \textbf{Version}\\[0.15cm]
+			\bubble{A} \\[0.1cm]
+			\bubble{B} \\[0.1cm]
+			\bubble{C} \\[0.1cm]
+			\bubble{D} \\[0.1cm]
+			\bubble{E} \\[0.1cm]
+			\bubble{F}
+		\end{minipage}
+		\hfill
+		\begin{minipage}[t]{0.75\textwidth}
+			\centering
+			\scriptsize \textbf{Student ID Number}\\[0.15cm]
+			% Blank Boxes
+			\begin{tabular}{|c|c|c|c|c|c|c|c|}
+				\hline
+				\rule{0pt}{0.3cm}\hspace{0.15cm} & \hspace{0.15cm} & \hspace{0.15cm} & \hspace{0.15cm} & \hspace{0.15cm} & \hspace{0.15cm} & \hspace{0.15cm} & \hspace{0.15cm} \\
+				\hline
+			\end{tabular}
+			\\[0.15cm]
+			% 8 Digit ID Bubbles
+			\setlength{\tabcolsep}{2pt}
+			\begin{tabular}{cccccccc}
+				\bubble{0} & \bubble{0} & \bubble{0} & \bubble{0} & \bubble{0} & \bubble{0} & \bubble{0} & \bubble{0} \\[0.1cm]
+				\bubble{1} & \bubble{1} & \bubble{1} & \bubble{1} & \bubble{1} & \bubble{1} & \bubble{1} & \bubble{1} \\[0.1cm]
+				\bubble{2} & \bubble{2} & \bubble{2} & \bubble{2} & \bubble{2} & \bubble{2} & \bubble{2} & \bubble{2} \\[0.1cm]
+				\bubble{3} & \bubble{3} & \bubble{3} & \bubble{3} & \bubble{3} & \bubble{3} & \bubble{3} & \bubble{3} \\[0.1cm]
+				\bubble{4} & \bubble{4} & \bubble{4} & \bubble{4} & \bubble{4} & \bubble{4} & \bubble{4} & \bubble{4} \\[0.1cm]
+				\bubble{5} & \bubble{5} & \bubble{5} & \bubble{5} & \bubble{5} & \bubble{5} & \bubble{5} & \bubble{5} \\[0.1cm]
+				\bubble{6} & \bubble{6} & \bubble{6} & \bubble{6} & \bubble{6} & \bubble{6} & \bubble{6} & \bubble{6} \\[0.1cm]
+				\bubble{7} & \bubble{7} & \bubble{7} & \bubble{7} & \bubble{7} & \bubble{7} & \bubble{7} & \bubble{7} \\[0.1cm]
+				\bubble{8} & \bubble{8} & \bubble{8} & \bubble{8} & \bubble{8} & \bubble{8} & \bubble{8} & \bubble{8} \\[0.1cm]
+				\bubble{9} & \bubble{9} & \bubble{9} & \bubble{9} & \bubble{9} & \bubble{9} & \bubble{9} & \bubble{9} \\
+			\end{tabular}
+		\end{minipage}
+	\end{minipage}
+	
+	\vspace{0.4cm}
+	\hrule
+	\vspace{0.4cm}
+	
+	% ================= QUESTIONS SECTION =================
+	\noindent
+	\begin{minipage}[t]{0.32\textwidth}
+		\foreach \q in {1,...,20} {
+			\noindent \makebox[0.6cm][r]{\textbf{\small \q}} \hspace{0.05cm}
+			\bubble{A} \bubble{B} \bubble{C} \bubble{D} \bubble{E} \bubble{F} \\[0.15cm]
+		}
+	\end{minipage}
+	\hfill
+	\begin{minipage}[t]{0.32\textwidth}
+		\foreach \q in {21,...,40} {
+			\noindent \makebox[0.6cm][r]{\textbf{\small \q}} \hspace{0.05cm}
+			\bubble{A} \bubble{B} \bubble{C} \bubble{D} \bubble{E} \bubble{F} \\[0.15cm]
+		}
+	\end{minipage}
+	\hfill
+	\begin{minipage}[t]{0.32\textwidth}
+		\foreach \q in {41,...,60} {
+			\noindent \makebox[0.6cm][r]{\textbf{\small \q}} \hspace{0.05cm}
+			\bubble{A} \bubble{B} \bubble{C} \bubble{D} \bubble{E} \bubble{F}\\[0.15cm]
+		}
+	\end{minipage}
+	
+	\vfill
+	
+	% Bottom Alignment Marks
+	\noindent
+	\cornerblock \hfill \cornerblock
+	
+\end{document}
