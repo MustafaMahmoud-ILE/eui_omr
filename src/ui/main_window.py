@@ -404,7 +404,9 @@ class ReviewModal(QDialog):
         
         lbl_sig = QLabel()
         if self.temp_sig_crop is not None:
-            lbl_sig.setPixmap(cv2_to_qpixmap(self.temp_sig_crop))
+            pix = cv2_to_qpixmap(self.temp_sig_crop)
+            scaled = pix.scaled(pix.width() * 0.75, pix.height() * 0.75, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            lbl_sig.setPixmap(scaled)
         l.addWidget(QLabel("Student's Handwritten Name:"))
         l.addWidget(lbl_sig)
         
@@ -417,7 +419,8 @@ class ReviewModal(QDialog):
         self.lbl_id = QLabel()
         if self.temp_id_crop is not None:
             pix = cv2_to_qpixmap(self.temp_id_crop)
-            self.lbl_id.setPixmap(pix)
+            scaled = pix.scaled(pix.width() * 0.75, pix.height() * 0.75, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.lbl_id.setPixmap(scaled)
         
         l.addWidget(self.lbl_id)
         
@@ -452,7 +455,9 @@ class ReviewModal(QDialog):
         l.addWidget(lbl_title)
         lbl_v = QLabel()
         if self.temp_ver_crop is not None:
-            lbl_v.setPixmap(cv2_to_qpixmap(self.temp_ver_crop))
+            pix = cv2_to_qpixmap(self.temp_ver_crop)
+            scaled = pix.scaled(pix.width() * 0.75, pix.height() * 0.75, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            lbl_v.setPixmap(scaled)
         l.addWidget(lbl_v)
         
         l.addSpacing(15)
@@ -479,7 +484,9 @@ class ReviewModal(QDialog):
         
         lbl_img = QLabel()
         if q_num in self.temp_q_crops:
-            lbl_img.setPixmap(cv2_to_qpixmap(self.temp_q_crops[q_num]))
+            pix = cv2_to_qpixmap(self.temp_q_crops[q_num])
+            scaled = pix.scaled(pix.width() * 0.75, pix.height() * 0.75, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            lbl_img.setPixmap(scaled)
         l.addWidget(lbl_img)
         
         l.addSpacing(15)
