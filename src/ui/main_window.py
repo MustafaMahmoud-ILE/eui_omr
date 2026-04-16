@@ -82,9 +82,9 @@ APP_STYLESHEET = """
         background-color: #0F172A; 
     }
     QPushButton:disabled { 
-        color: #475569; 
-        background-color: #020617; 
-        border: 1px solid #0F172A; 
+        color: #334155; 
+        background-color: transparent; 
+        border: 1px solid #1E293B; 
     }
     
     QPushButton[cssClass="primary"] { 
@@ -95,6 +95,10 @@ APP_STYLESHEET = """
     QPushButton[cssClass="primary"]:hover { 
         background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #38BDF8, stop:1 #3B82F6);
     }
+    QPushButton[cssClass="primary"]:disabled {
+        background-color: #0F172A;
+        color: #334155;
+    }
     
     QPushButton[cssClass="success"] { 
         background-color: #059669; 
@@ -102,6 +106,10 @@ APP_STYLESHEET = """
         border: none;
     }
     QPushButton[cssClass="success"]:hover { background-color: #10B981; }
+    QPushButton[cssClass="success"]:disabled {
+        background-color: #064E3B; /* Darker, desaturated green */
+        opacity: 0.5;
+    }
     
     QPushButton[cssClass="warning"] { 
         background-color: #D97706; 
@@ -109,6 +117,9 @@ APP_STYLESHEET = """
         border: none;
     }
     QPushButton[cssClass="warning"]:hover { background-color: #F59E0B; }
+    QPushButton[cssClass="warning"]:disabled {
+        background-color: #78350F; /* Darker, desaturated amber */
+    }
     
     /* Inputs */
     QLineEdit, QComboBox, QSpinBox {
