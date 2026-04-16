@@ -25,7 +25,9 @@ Traditional OMR systems often trap educational institutions in expensive ecosyst
 - **Automatic Model Detection**: Scans mixed batches of exam versions (e.g., Form A, B, C) simultaneously.
 - **Intelligent Page Orientation**: Automatically corrects page rotation and skew.
 - **Integrated Manual Review**: A dedicated UI for resolving ambiguities with physical crop verification.
-- **Global Data Guard (Mirroring)**: Automatically clones student scans into the project directory for total portability.
+- **Global Data Guard (Mirroring)**: Automatically clones student scans and rosters into the project directory for total portability.
+- **Robust Excel Synchronization**: One-click export that updates both the project copy and your original master roster file.
+- **Failsafe ID Matching**: Intelligent matching that bridges 'Text vs Number' gaps and handles complex Excel formatting automatically.
 
 ## 📄 Documentation
 For a deep technical dive into the algorithms, architecture, and OMR logic, please refer to the:
