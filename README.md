@@ -8,6 +8,14 @@ EUI OMR Engine is an industrial-grade Optical Mark Recognition (OMR) system desi
 |:---:|:---:|:---:|
 | ![Welcome](assets/screenshots/welcome.png) | ![Setup](assets/screenshots/setup.png) | ![Dashboard](assets/screenshots/dashboard.png) |
 
+## 📥 Download & Installation
+
+### ⚡ Quick Start (Recommended for Users)
+For the most stable experience, download the latest standalone executable from our **[Releases Page](https://github.com/MustafaMahmoud-ILE/eui_omr/releases)**. 
+1. Download `EUI_OMR_Engine_v2.2.1.zip` from the latest release.
+2. Extract the folder and run `EUI_OMR_Engine.exe`.
+3. No Python installation required!
+
 ## 🎯 The Problem & Our Solution
 
 Traditional OMR systems often trap educational institutions in expensive ecosystems:
