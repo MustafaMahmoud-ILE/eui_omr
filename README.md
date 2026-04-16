@@ -1,4 +1,4 @@
-# EUI OMR Engine - Professional Grading & Research Platform
+# EUI OMR Engine - Egypt University of Informatics
 
 EUI OMR Engine is an industrial-grade Optical Mark Recognition (OMR) system designed to eliminate the high costs and logistical constraints of traditional grading hardware. It provides a standardized solution for extracting data from scanned bubble sheets using regular office equipment.
 

@@ -129,7 +129,7 @@ class TitleBar(QWidget):
             self.logo.setPixmap(logo_pix.scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         layout.addWidget(self.logo)
         
-        self.title = QLabel("EUI OMR Engine")
+        self.title = QLabel("EUI OMR | Egypt University of Informatics")
         self.title.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: 600; font-size: 12px;")
         layout.addWidget(self.title)
         
@@ -228,6 +228,12 @@ class Sidebar(QWidget):
         self.layout.addStretch()
         
         # Bottom info
+        self.lbl_uni = QLabel("Egypt University of Informatics")
+        self.lbl_uni.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+        self.lbl_uni.setAlignment(Qt.AlignCenter)
+        self.lbl_uni.setWordWrap(True)
+        self.layout.addWidget(self.lbl_uni)
+
         self.lbl_version = QLabel("v2.1.0")
         self.lbl_version.setAlignment(Qt.AlignCenter)
         self.layout.addWidget(self.lbl_version)
@@ -264,8 +270,10 @@ class Sidebar(QWidget):
         
         if self.is_collapsed:
             self.lbl_version.setText("v2.1")
+            self.lbl_uni.setText("EUI")
         else:
             self.lbl_version.setText("v2.1.0")
+            self.lbl_uni.setText("Egypt University of Informatics")
 
     def set_active(self, index):
         for i, item in enumerate(self.items):
