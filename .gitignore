@@ -12,19 +12,26 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # PyInstaller
-#  Often these are too big for GitHub
 build/
 dist/
 *.spec
+*.zip
 
-# PDF & Data (Local projects - keep ignored)
+# OMR Project Data
+# (We ignore local grading runs to keep the repo focus on code)
 project_state.json
 crops/
+imports/
+*.log
 
-# Allow Tracking of Configuration and Core Test Assets
-!config.json
-!test_data_gen/*.pdf
-!test_data_gen/*.xlsx
+# LaTeX Artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
 
 # IDEs
 .vscode/
