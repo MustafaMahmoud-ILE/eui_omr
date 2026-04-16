@@ -21,6 +21,7 @@ class ProjectManager:
         self.question_count: int = 60
         self.active_models: int = 6 # Up to 6
         self.excel_roster_path: str = ""
+        self.original_excel_path: str = ""
         self.student_id_col: str = ""
         self.grade_output_col: str = ""
         self.student_pdf_path: str = ""
@@ -69,6 +70,7 @@ class ProjectManager:
             shutil.copy2(src, dest)
             
         self.excel_roster_path = str(dest)
+        self.original_excel_path = str(src.absolute())
         self.save_state()
         return dest
 

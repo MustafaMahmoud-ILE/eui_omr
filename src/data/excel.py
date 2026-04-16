@@ -16,6 +16,33 @@ class ExcelManager:
         except Exception:
             return []
 
+    def _normalize_id(self, val) -> str:
+        """
+        Cleans and normalizes IDs for matching. 
+        Robustly handles hyphens, leading zeros, and pandas float suffixes (.0).
+        Returns a 'clean numeric string' for comparison.
+        """
+        if val is None: return ""
+        s = str(val).strip().lower()
+        if s in ["nan", "none", "null", "nat"]: return ""
+        
+        # Handle the common pandas float-conversion suffix '.0'
+        if s.endswith(".0"):
+            s = s[:-2]
+            
+        # Keep only digits
+        s = "".join(c for c in s if c.isdigit())
+        
+        # Strip leading zeros
+        s = s.lstrip("0")
+        
+        # FINAL FALLBACK: If normalization resulted in a valid integer string, 
+        # that is what we return.
+        if not s and any(c.isdigit() for c in str(val)):
+            return "0"
+            
+        return s
+
     def export_grades(
         self,
         results_data: List[dict],
@@ -31,14 +58,26 @@ class ExcelManager:
         if not self.file_path.exists():
             raise FileNotFoundError("Excel master file is missing.")
             
-        # 1. Load Original Data and detect sheet name
+        # 1. Load Original Data and detect dynamic sheet name
         try:
+            main_sheet_name = None
+            df_roster = None
+            
             with pd.ExcelFile(self.file_path) as xl:
-                sheet_names = xl.sheet_names
-                if not sheet_names:
-                    raise ValueError("Excel file has no sheets.")
-                main_sheet_name = sheet_names[0]
-                df_roster = pd.read_excel(xl, sheet_name=main_sheet_name)
+                # Search all sheets for the one containing student_id_col
+                for sheet in xl.sheet_names:
+                    # Read only headers to check
+                    df_check = pd.read_excel(xl, sheet_name=sheet, nrows=0)
+                    if student_id_col in df_check.columns:
+                        main_sheet_name = sheet
+                        df_roster = pd.read_excel(xl, sheet_name=sheet)
+                        break
+                
+                if not main_sheet_name:
+                    # Fallback to first sheet if not found (though UI should prevent this)
+                    main_sheet_name = xl.sheet_names[0]
+                    df_roster = pd.read_excel(xl, sheet_name=main_sheet_name)
+                    
         except Exception as e:
             raise RuntimeError(f"Could not read Excel file: {e}")
 
@@ -50,15 +89,20 @@ class ExcelManager:
         breakdown_rows = []
         
         # Create a mapping of normalized IDs in roster for fast lookup
-        # We store (normalized_id -> original_index)
         id_map = {}
         for idx, val in df_roster[student_id_col].items():
             norm = self._normalize_id(val)
             if norm:
-                id_map[norm] = idx
-
+                # Store by 'mathematical ID' (integer string) to eliminate formatting differences
+                try: m_id = str(int(norm))
+                except: m_id = norm
+                id_map[m_id] = idx
         for res in results_data:
-            sid = self._normalize_id(res["student_id"])
+            # Normalize OMR ID and convert to mathematical form for comparison
+            sid_norm = self._normalize_id(res["student_id"])
+            try: sid_math = str(int(sid_norm))
+            except: sid_math = sid_norm
+            
             version = res["version"]
             
             # Calculate Score
@@ -75,9 +119,9 @@ class ExcelManager:
                         if any(a in correct_answers for a in student_answers):
                             score += 1
                         
-            # Update original roster using normalized mapping
-            if sid in id_map:
-                row_idx = id_map[sid]
+            # Update original roster using mathematical mapping
+            if sid_math in id_map:
+                row_idx = id_map[sid_math]
                 df_roster.at[row_idx, grade_col] = score
                 
             # Build detailed row
@@ -97,11 +141,32 @@ class ExcelManager:
         df_breakdown = pd.DataFrame(breakdown_rows)
         
         # 3. Write back to Excel
+        def get_m(s):
+            try: return str(int(self._normalize_id(s)))
+            except: return self._normalize_id(s)
+        match_count = sum(1 for res in results_data if get_m(res["student_id"]) in id_map)
+        
         try:
-            with pd.ExcelWriter(self.file_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-                # Use the ORIGINAL main_sheet_name to avoid duplicates
+            # 3a. Read all existing sheets to preserve them
+            all_sheets = {}
+            with pd.ExcelFile(self.file_path) as xl:
+                for sheet in xl.sheet_names:
+                    # Skip the ones we are about to overwrite/create
+                    if sheet == main_sheet_name or sheet == "OMR Breakdown":
+                        continue
+                    all_sheets[sheet] = pd.read_excel(xl, sheet_name=sheet)
+            
+            # 3b. Write everything back
+            with pd.ExcelWriter(self.file_path, engine="openpyxl") as writer:
+                # Write back the original data first
+                for sheet, df in all_sheets.items():
+                    df.to_excel(writer, sheet_name=sheet, index=False)
+                
+                # Write updated roster and breakdown
                 df_roster.to_excel(writer, sheet_name=main_sheet_name, index=False)
                 df_breakdown.to_excel(writer, sheet_name="OMR Breakdown", index=False)
+                
+            return match_count
         except PermissionError:
             raise PermissionError(f"The file '{self.file_path.name}' is open in another program. Please close it and try again.")
         except Exception as e:

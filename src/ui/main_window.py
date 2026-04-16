@@ -269,13 +269,13 @@ class Sidebar(QWidget):
             item.setCollapsed(self.is_collapsed)
         
         if self.is_collapsed:
-            self.lbl_version.setText("v2.1")
+            self.lbl_version.setText("v2.2")
             self.lbl_uni.setText("EUI")
         else:
-            self.lbl_version.setText("v2.1.0")
+            self.lbl_version.setText("v2.2.1")
             self.lbl_uni.setText("Egypt University of Informatics")
 
-    def set_active(self, index):
+    def set_active(self, index, **kwargs):
         for i, item in enumerate(self.items):
             active = (i == index)
             item.setChecked(active)
@@ -1293,7 +1293,7 @@ class MainWindow(QMainWindow):
         
         # Navigate to setup
         self.stack.slideInIdx(2)
-        self.sidebar.set_active(2, easing=QEasingCurve.OutCubic)
+        self.sidebar.set_active(2)
         
         # Phase 1: Silent Automated Calibration (5 Random Pages)
         QTimer.singleShot(100, self._start_silent_calibration)
@@ -1751,10 +1751,12 @@ class MainWindow(QMainWindow):
             return
 
         from src.data.excel import ExcelManager
-        em = ExcelManager(self.pm.excel_roster_path)
+        dicts = [r.to_dict() for r in self.results_data]
+        
         try:
-            dicts = [r.to_dict() for r in self.results_data]
-            em.export_grades(
+            # 1. Update project-internal copy (Primary)
+            em_local = ExcelManager(self.pm.excel_roster_path)
+            count = em_local.export_grades(
                 results_data=dicts,
                 student_id_col=self.pm.student_id_col,
                 grade_col=self.pm.grade_output_col,
@@ -1762,8 +1764,43 @@ class MainWindow(QMainWindow):
                 answer_keys=self.pm.answer_keys
             )
             
-            msg = f"Grades exported to {Path(self.pm.excel_roster_path).name}\n\nWould you like to open the file now?"
-            reply = QMessageBox.question(self, "Export Successful", msg, QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            # 2. Synchronize back to the Original File (If possible)
+            synced_original = False
+            if self.pm.original_excel_path and Path(self.pm.original_excel_path).exists():
+                orig_path = Path(self.pm.original_excel_path)
+                if orig_path.resolve() != Path(self.pm.excel_roster_path).resolve():
+                    try:
+                        em_orig = ExcelManager(orig_path)
+                        em_orig.export_grades(
+                            results_data=dicts,
+                            student_id_col=self.pm.student_id_col,
+                            grade_col=self.pm.grade_output_col,
+                            question_count=self.pm.question_count,
+                            answer_keys=self.pm.answer_keys
+                        )
+                        synced_original = True
+                    except Exception as e:
+                        # Don't block the whole process if original sync fails (maybe open in Excel)
+                        QMessageBox.warning(self, "Sync Warning", f"Could not update original file: {e}\n\nProject copy was updated successfully.")
+            
+            # 3. Success or Diagnostic Message
+            status_text = ""
+            if count == 0:
+                status_text = (f"Export finished, but 0 students were matched in the Master sheet.\n\n"
+                               f"This usually means the IDs in the PDF don't match your Excel format.\n"
+                               f"Check the 'OMR Breakdown' sheet inside for details.")
+            else:
+                status_text = f"Success! {count} students were matched and graded."
+                if synced_original:
+                    status_text += f"\n\nBoth your original roster and the project copy have been updated."
+                else:
+                    status_text += f"\n\nResults saved to the project folder."
+                
+            msg = (f"{status_text}\n\n"
+                   f"File: {Path(self.pm.excel_roster_path).name}\n\n"
+                   "Would you like to open the results now?")
+                   
+            reply = QMessageBox.question(self, "Export Results", msg, QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
             
             if reply == QMessageBox.Yes:
                 os.startfile(self.pm.excel_roster_path)

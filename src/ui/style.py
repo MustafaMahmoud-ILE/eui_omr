@@ -10,6 +10,7 @@ COLORS = {
     "accent_pressed": "#2563EB",
     "text_primary": "#FFFFFF",
     "text_secondary": "#B0B0B0",
+    "text_dim": "#71717A",
     "border": "#2A2A2A",
     "border_focus": "#3B82F6",
     "error": "#EF4444",
